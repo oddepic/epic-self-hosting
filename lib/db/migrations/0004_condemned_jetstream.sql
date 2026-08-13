@@ -1,0 +1,1 @@
+ALTER TABLE `animes` ADD `last_watched_at` integer;

@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1786121814253,
+      "tag": "0000_condemned_chimera",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786128650449,
+      "tag": "0001_remarkable_radioactive_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786221849190,
+      "tag": "0002_broken_slipstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786300696919,
+      "tag": "0003_worthless_sheva_callister",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786302478439,
+      "tag": "0004_condemned_jetstream",
+      "breakpoints": true
+    }
+  ]
+}

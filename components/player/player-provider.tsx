@@ -1,0 +1,542 @@
+"use client";
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, Volume1, Volume2, VolumeX, X } from "lucide-react";
+import { usePlayerEngine, type PlaybackStart, type PlayerState } from "./use-player-engine";
+
+export interface PlayerContextValue {
+  videoRef: RefObject<HTMLVideoElement | null>;
+  state: PlayerState;
+  play: (episodeId: number, resume?: boolean) => Promise<void>;
+  close: () => void;
+  setSubtitle: (index: number | null) => void;
+  setAudio: (index: number) => Promise<void>;
+  session: PlaybackStart | null;
+  mode: "hidden" | "big" | "mini";
+}
+
+const PlayerContext = createContext<PlayerContextValue | null>(null);
+
+export function usePlayer(): PlayerContextValue {
+  const value = useContext(PlayerContext);
+  if (!value) throw new Error("usePlayer must be used within PlayerProvider");
+  return value;
+}
+
+function formatPosition(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function PlayerProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const subtitleCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const barRef = useRef<HTMLDivElement | null>(null);
+  const pendingSkipRef = useRef(0);
+  const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const SKIP_COALESCE_MS = 300;
+
+  const onAutoAdvance = useMemo(
+    () => (episodeId: number) => {
+      router.replace(`/watch/${episodeId}`);
+    },
+    [router],
+  );
+
+  const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef });
+  const isWatchRoute = (pathname ?? "").startsWith("/watch/");
+
+  const mode: PlayerContextValue["mode"] = isWatchRoute
+    ? "big"
+    : state.status !== "idle" && state.session != null
+      ? "mini"
+      : "hidden";
+  const value = useMemo<PlayerContextValue>(
+    () => ({ videoRef, state, play, close, setSubtitle, setAudio, session: state.session, mode }),
+    [videoRef, state, play, close, setSubtitle, setAudio, mode],
+  );
+
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [dragging, setDragging] = useState(false);
+  const [dragFraction, setDragFraction] = useState<number | null>(null);
+  const [volume, setVolume] = useState(1);
+  const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false);
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const controlsHoveredRef = useRef(false);
+
+  const showControls = useCallback(() => {
+    setControlsVisible(true);
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => {
+      if (controlsHoveredRef.current) return;
+      const video = videoRef.current;
+      if (video && !video.paused) setControlsVisible(false);
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "big") return;
+    if (state.status === "playing") {
+      showControls();
+    } else {
+      setControlsVisible(true);
+    }
+    return () => {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    };
+  }, [mode, state.status, showControls]);
+
+  const label = state.session
+    ? `${state.session.animeTitle ?? "Anime"} · S${String(state.session.seasonNumber).padStart(2, "0")}E${String(state.session.episodeNumber).padStart(2, "0")}`
+    : null;
+
+  const progress =
+    state.durationSeconds && state.durationSeconds > 0
+      ? (state.positionSeconds / state.durationSeconds) * 100
+      : 0;
+
+  const displayedFraction =
+    dragging && dragFraction != null
+      ? dragFraction
+      : state.durationSeconds && state.durationSeconds > 0
+        ? state.positionSeconds / state.durationSeconds
+        : 0;
+
+  const togglePlay = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) void video.play().catch(() => {});
+    else video.pause();
+  }, []);
+
+  const setVolumeLevel = useCallback((level: number) => {
+    const video = videoRef.current;
+    setVolume(level);
+    if (video) video.volume = level;
+  }, []);
+
+  const onPickSubtitle = useCallback(
+    (index: number | null) => {
+      setSubtitleMenuOpen(false);
+      setSubtitle(index);
+    },
+    [setSubtitle],
+  );
+
+  const onPickAudio = useCallback(
+    (index: number) => {
+      setAudioMenuOpen(false);
+      void setAudio(index);
+    },
+    [setAudio],
+  );
+
+  const skip = useCallback(
+    (deltaSeconds: number) => {
+      const video = videoRef.current;
+      if (!video) return;
+      // Coalesce rapid skips (holding ±5s / arrow keys): accumulate all
+      // presses within a window into ONE jump to the final target. hls.js
+      // cannot handle a flood of currentTime changes on a transcoded HLS
+      // stream (→ CHUNK_DEMUXER_ERROR_APPEND_FAILED), so collapse them.
+      pendingSkipRef.current += deltaSeconds;
+      if (skipTimerRef.current) return;
+      skipTimerRef.current = setTimeout(() => {
+        skipTimerRef.current = null;
+        const delta = pendingSkipRef.current;
+        pendingSkipRef.current = 0;
+        if (delta === 0) return;
+        const duration = video.duration;
+        const target = Number.isFinite(duration)
+          ? clamp(video.currentTime + delta, 0, duration)
+          : Math.max(0, video.currentTime + delta);
+        video.currentTime = target;
+        showControls();
+      }, SKIP_COALESCE_MS);
+    },
+    [showControls],
+  );
+
+  const fractionFromEvent = useCallback((clientX: number): number => {
+    const rect = barRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return 0;
+    return clamp((clientX - rect.left) / rect.width, 0, 1);
+  }, []);
+
+  const onBarPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      const video = videoRef.current;
+      if (!video) return;
+      e.preventDefault();
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      setDragging(true);
+      setDragFraction(fractionFromEvent(e.clientX));
+    },
+    [fractionFromEvent],
+  );
+
+  const onBarPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!dragging) return;
+      setDragFraction(fractionFromEvent(e.clientX));
+    },
+    [dragging, fractionFromEvent],
+  );
+
+  const onBarPointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      const video = videoRef.current;
+      const duration = video?.duration;
+      if (video && Number.isFinite(duration)) {
+        video.currentTime = fractionFromEvent(e.clientX) * (duration as number);
+      }
+      setDragging(false);
+      setDragFraction(null);
+    },
+    [fractionFromEvent],
+  );
+
+  useEffect(() => {
+    if (mode !== "big") return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        skip(-5);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        skip(5);
+      } else if (e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        togglePlay();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mode, skip, togglePlay]);
+
+  return (
+    <PlayerContext.Provider value={value}>
+      {children}
+
+      {/* One <video>, always mounted. Only its wrapper's layout changes. */}
+      <div
+        className={
+          mode === "hidden"
+            ? "hidden"
+            : mode === "big"
+              ? "fixed inset-0 z-40 bg-black"
+              : "fixed bottom-4 left-1/2 z-50 w-80 -translate-x-1/2 overflow-hidden rounded-xl border border-border-strong bg-surface"
+        }
+      >
+        <div
+          className={mode === "big" ? "relative h-full w-full" : "relative"}
+          onPointerMove={mode === "big" ? showControls : undefined}
+          onPointerDown={mode === "big" ? showControls : undefined}
+        >
+          {/* Media layer — independent of the overlay layers. It owns the
+              clip (overflow-hidden) and the video's black background, so the
+              video's letterbox edge can never bleed into the overlays. The
+              subtitle canvas lives here too, sharing the video's offset
+              parent and clip. */}
+          <div
+            className={
+              mode === "big"
+                ? "absolute inset-0 overflow-hidden bg-black"
+                : "relative h-36 w-full overflow-hidden rounded-lg bg-black"
+            }
+          >
+            <video
+              ref={videoRef}
+              autoPlay
+              crossOrigin="anonymous"
+              className="h-full w-full object-contain"
+            />
+            <canvas
+              ref={subtitleCanvasRef}
+              className="pointer-events-none absolute"
+            />
+          </div>
+
+          {mode === "big" && (state.buffering || state.status === "starting") && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 className="h-12 w-12 animate-spin text-text-secondary" aria-hidden />
+            </div>
+          )}
+
+          {mode === "mini" && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-surface-raised">
+              <div className="h-full bg-accent" style={{ width: `${progress}%` }} />
+            </div>
+          )}
+
+          {mode === "big" && (
+            <div
+              className={`absolute inset-x-0 top-0 flex items-center justify-between bg-linear-to-b from-black/80 to-transparent px-4 pb-10 pt-3 transition-opacity ${
+                controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+              }`}
+              onPointerEnter={() => {
+                controlsHoveredRef.current = true;
+                showControls();
+              }}
+              onPointerLeave={() => {
+                controlsHoveredRef.current = false;
+                showControls();
+              }}
+            >
+              <button
+                onClick={() => router.push("/")}
+                aria-label="Back"
+                className="rounded-lg p-2 text-text-primary transition-colors hover:bg-surface-hover"
+              >
+                <ArrowLeft className="h-5 w-5" aria-hidden />
+              </button>
+              <span
+                className="h-2.5 w-2.5 rounded-full transition-colors"
+                style={{
+                  backgroundColor:
+                    state.status === "playing"
+                      ? "var(--success)"
+                      : state.status === "paused"
+                        ? "var(--warning)"
+                        : state.status === "error"
+                          ? "var(--danger)"
+                          : "var(--text-muted)",
+                }}
+                aria-label={`Status: ${state.status}`}
+              />
+            </div>
+          )}
+
+          {mode === "big" && state.status === "error" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/80">
+              <div className="max-w-md p-8 text-center">
+                <h1 className="text-xl font-semibold text-text-primary">Playback failed</h1>
+                {state.error && <p className="mt-2 text-sm text-text-secondary">{state.error}</p>}
+                <Link href="/" className="mt-4 inline-block text-accent hover:underline">
+                  ← Back to home
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {mode === "big" && (
+            <div
+              className={`absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 to-transparent px-4 pb-3 pt-10 transition-opacity ${
+                controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+              }`}
+              onPointerEnter={() => {
+                controlsHoveredRef.current = true;
+                showControls();
+              }}
+              onPointerLeave={() => {
+                controlsHoveredRef.current = false;
+                showControls();
+              }}
+            >
+              <div
+                ref={barRef}
+                role="slider"
+                aria-label="Seek"
+                aria-valuemin={0}
+                aria-valuemax={Math.round(state.durationSeconds ?? 0)}
+                aria-valuenow={Math.round(state.durationSeconds ? displayedFraction * state.durationSeconds : 0)}
+                className="group flex h-5 cursor-pointer touch-none items-center"
+                onPointerDown={onBarPointerDown}
+                onPointerMove={onBarPointerMove}
+                onPointerUp={onBarPointerUp}
+              >
+                <div className="relative h-1 w-full overflow-hidden rounded-full bg-surface-raised">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-accent"
+                    style={{ width: `${displayedFraction * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-1 flex items-center gap-1">
+                <button
+                  onClick={() => skip(-5)}
+                  aria-label="Back 5 seconds"
+                  className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                >
+                  <RotateCcw className="h-5 w-5" aria-hidden />
+                  <span className="sr-only">Back 5 seconds</span>
+                </button>
+                <button
+                  onClick={togglePlay}
+                  aria-label={state.status === "paused" ? "Resume" : "Pause"}
+                  className="rounded-lg p-2 text-text-primary transition-colors hover:bg-surface-hover"
+                >
+                  {state.status === "paused" ? (
+                    <Play className="h-5 w-5" aria-hidden />
+                  ) : (
+                    <Pause className="h-5 w-5" aria-hidden />
+                  )}
+                </button>
+                <button
+                  onClick={() => skip(5)}
+                  aria-label="Forward 5 seconds"
+                  className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                >
+                  <RotateCw className="h-5 w-5" aria-hidden />
+                  <span className="sr-only">Forward 5 seconds</span>
+                </button>
+
+                <span className="ml-2 font-mono text-xs text-text-secondary">
+                  {formatPosition(state.positionSeconds)}
+                  {state.durationSeconds ? ` / ${formatPosition(state.durationSeconds)}` : ""}
+                </span>
+
+                <div className="ml-auto flex items-center gap-1">
+                  <div className="group flex items-center">
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={volume}
+                      onChange={(e) => setVolumeLevel(Number(e.target.value))}
+                      aria-label="Volume"
+                      className="w-0 origin-right scale-x-0 opacity-0 transition-all duration-150 group-hover:mr-1 group-hover:w-20 group-hover:scale-x-100 group-hover:opacity-100 accent-accent"
+                    />
+                    <button
+                      onClick={() => setVolumeLevel(volume > 0 ? 0 : 1)}
+                      aria-label={volume > 0 ? "Mute" : "Unmute"}
+                      className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                    >
+                      {volume === 0 ? (
+                        <VolumeX className="h-5 w-5" aria-hidden />
+                      ) : volume < 0.5 ? (
+                        <Volume1 className="h-5 w-5" aria-hidden />
+                      ) : (
+                        <Volume2 className="h-5 w-5" aria-hidden />
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="relative">
+                    <button
+                      onClick={() => setAudioMenuOpen((o) => !o)}
+                      aria-label="Audio track"
+                      className={`rounded-lg p-2 transition-colors hover:bg-surface-hover ${
+                        audioMenuOpen ? "text-accent" : "text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      <AudioLines className="h-5 w-5" aria-hidden />
+                    </button>
+                    {audioMenuOpen && (
+                      <div className="absolute bottom-12 right-0 max-h-64 w-56 overflow-y-auto rounded-xl border border-border-strong bg-surface p-1">
+                        {state.session?.audioTracks.map((track) => (
+                          <button
+                            key={track.index}
+                            onClick={() => onPickAudio(track.index)}
+                            className={`w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
+                              state.activeAudioIndex === track.index ? "text-accent" : "text-text-secondary"
+                            }`}
+                          >
+                            {track.displayTitle ?? track.language ?? `Track ${track.index}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <button
+                      onClick={() => setSubtitleMenuOpen((o) => !o)}
+                      aria-label="Subtitles"
+                      className={`rounded-lg p-2 transition-colors hover:bg-surface-hover ${
+                        subtitleMenuOpen ? "text-accent" : "text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      <Captions className="h-5 w-5" aria-hidden />
+                    </button>
+                    {subtitleMenuOpen && (
+                      <div className="absolute bottom-12 right-0 max-h-64 w-56 overflow-y-auto rounded-xl border border-border-strong bg-surface p-1">
+                        <button
+                          onClick={() => onPickSubtitle(null)}
+                          className={`w-full rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
+                            state.activeSubtitleIndex == null ? "text-accent" : "text-text-secondary"
+                          }`}
+                        >
+                          Off
+                        </button>
+                        {state.session?.subtitleTracks.map((track) => (
+                          <button
+                            key={track.index}
+                            onClick={() => onPickSubtitle(track.index)}
+                            className={`w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
+                              state.activeSubtitleIndex === track.index ? "text-accent" : "text-text-secondary"
+                            }`}
+                          >
+                            {track.displayTitle ?? track.language ?? `Track ${track.index}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => router.push("/")}
+                    aria-label="Minimize player"
+                    className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+                  >
+                    <Minimize2 className="h-5 w-5" aria-hidden />
+                    <span className="sr-only">Minimize player</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {mode === "mini" && state.session && (
+          <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
+            <button
+              onClick={togglePlay}
+              aria-label={state.status === "paused" ? "Resume" : "Pause"}
+              className="rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              {state.status === "paused" ? (
+                <Play className="h-4 w-4" aria-hidden />
+              ) : (
+                <Pause className="h-4 w-4" aria-hidden />
+              )}
+            </button>
+            <button
+              onClick={() => router.push(`/watch/${state.session!.episodeId}`)}
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-surface-hover"
+            >
+              <Maximize className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden />
+              <span className="truncate font-mono text-xs text-text-primary">{label}</span>
+              <span className="ml-auto shrink-0 font-mono text-[11px] text-text-muted">
+                {formatPosition(state.positionSeconds)}
+                {state.durationSeconds ? ` / ${formatPosition(state.durationSeconds)}` : ""}
+              </span>
+            </button>
+            <button
+              onClick={close}
+              aria-label="Close player"
+              className="rounded-lg p-1.5 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        )}
+      </div>
+    </PlayerContext.Provider>
+  );
+}
