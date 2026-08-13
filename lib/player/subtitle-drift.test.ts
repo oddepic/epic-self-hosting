@@ -12,20 +12,22 @@ describe("subtitleDriftOffsetSeconds", () => {
     expect(subtitleDriftOffsetSeconds(Infinity)).toBe(0);
   });
 
-  it("grows linearly with position", () => {
-    expect(subtitleDriftOffsetSeconds(100)).toBeCloseTo(0.26, 6);
-    expect(subtitleDriftOffsetSeconds(600)).toBeCloseTo(1.56, 6);
+  it("returns a NEGATIVE offset that grows in magnitude with position", () => {
+    // JASSUB renders at mediaTime + timeOffset; to delay a subtitle we need a
+    // negative offset (see subtitle-drift.ts docstring).
+    expect(subtitleDriftOffsetSeconds(100)).toBeCloseTo(-0.26, 6);
+    expect(subtitleDriftOffsetSeconds(600)).toBeCloseTo(-1.56, 6);
   });
 
-  it("matches the calibrated rate at the measured points", () => {
+  it("matches the calibrated magnitude at the measured points", () => {
     // Measured 2026-08-12: audio lags ~1.40s at 620s (browser ref) and
     // transcode content shift ~1.70s at 600s (direct segment decode).
-    expect(subtitleDriftOffsetSeconds(620)).toBeCloseTo(1.612, 3);
-    expect(subtitleDriftOffsetSeconds(600)).toBeCloseTo(1.56, 3);
+    expect(Math.abs(subtitleDriftOffsetSeconds(620))).toBeCloseTo(1.612, 3);
+    expect(Math.abs(subtitleDriftOffsetSeconds(600))).toBeCloseTo(1.56, 3);
   });
 
   it("honors a custom rate", () => {
-    expect(subtitleDriftOffsetSeconds(100, 0.01)).toBeCloseTo(1, 6);
+    expect(subtitleDriftOffsetSeconds(100, 0.01)).toBeCloseTo(-1, 6);
   });
 
   it("exposes the default rate", () => {
