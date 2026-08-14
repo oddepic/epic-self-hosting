@@ -14,6 +14,7 @@ import {
   ticksFromSeconds,
 } from "@/lib/player/save-policy";
 import { reanchorTarget } from "@/lib/player/reanchor";
+import { subtitleDriftOffsetSeconds } from "@/lib/player/subtitle-drift";
 
 const RECOVER_COOLDOWN_MS = 4000;
 const STALL_TIMEOUT_MS = 10_000;
@@ -24,6 +25,23 @@ export interface AudioTrackInfo {
   language: string | null;
   codec: string | null;
   displayTitle: string | null;
+}
+
+export interface SubtitleTrackInfo {
+  index: number;
+  language: string | null;
+  codec: string | null;
+  isForced: boolean;
+  isDefault: boolean;
+  displayTitle: string | null;
+  deliveryUrl: string;
+}
+
+export interface FontAttachmentInfo {
+  index: number;
+  fileName: string | null;
+  mimeType: string | null;
+  deliveryUrl: string;
 }
 
 export interface PlaybackStart {
@@ -40,6 +58,9 @@ export interface PlaybackStart {
   animeTitle: string | null;
   audioTracks: AudioTrackInfo[];
   selectedAudioIndex: number | null;
+  subtitleTracks: SubtitleTrackInfo[];
+  fontAttachments: FontAttachmentInfo[];
+  selectedSubtitleIndex: number | null;
 }
 
 export interface PlayerState {
@@ -49,15 +70,17 @@ export interface PlayerState {
   positionSeconds: number;
   durationSeconds: number | null;
   activeAudioIndex: number | null;
+  activeSubtitleIndex: number | null;
   buffering: boolean;
 }
 
 export interface PlayerEngineOptions {
   onAutoAdvance: (episodeId: number) => void;
   videoRef: RefObject<HTMLVideoElement | null>;
+  subtitleCanvasRef: RefObject<HTMLCanvasElement | null>;
 }
 
-export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions) {
+export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: PlayerEngineOptions) {
   const [state, setState] = useState<PlayerState>({
     status: "idle",
     error: null,
@@ -65,6 +88,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     positionSeconds: 0,
     durationSeconds: null,
     activeAudioIndex: null,
+    activeSubtitleIndex: null,
     buffering: false,
   });
 
@@ -72,6 +96,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
   const lastPositionRef = useRef(0);
   const lastSaveAtRef = useRef(0);
   const hlsRef = useRef<import("hls.js").default | null>(null);
+  const jassubRef = useRef<import("jassub").default | null>(null);
   const startPositionRef = useRef(0);
   const loadGenerationRef = useRef(0);
   const autoAdvanceRef = useRef(onAutoAdvance);
@@ -146,6 +171,9 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       const position = video.currentTime;
       lastPositionRef.current = position;
       setState((s) => ({ ...s, positionSeconds: position, durationSeconds: video.duration }));
+      if (jassubRef.current) {
+        jassubRef.current.timeOffset = subtitleDriftOffsetSeconds(position);
+      }
       if (shouldSaveNow(lastSaveAtRef.current, Date.now())) {
         reportProgress(position, video.paused);
       }
@@ -309,6 +337,8 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     }
     hlsRef.current?.destroy();
     hlsRef.current = null;
+    jassubRef.current?.destroy();
+    jassubRef.current = null;
     const video = videoRef.current;
     if (video) {
       video.pause();
@@ -404,6 +434,53 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       },
     [reportStopped, recoverMediaError, recoverStream, videoRef],
     );
+
+    const attachSubtitles = useCallback(
+      async (track: SubtitleTrackInfo | null, fonts: FontAttachmentInfo[]) => {
+        jassubRef.current?.destroy();
+        jassubRef.current = null;
+        const video = videoRef.current;
+        if (!track || !video) return;
+        const generation = loadGenerationRef.current;
+        try {
+          const { default: JASSUB } = await import("jassub");
+          const [subResponse, ...fontResponses] = await Promise.all([
+            fetch(track.deliveryUrl),
+            ...fonts.map((f) => fetch(f.deliveryUrl).then((r) => (r.ok ? r.arrayBuffer() : null))),
+          ]);
+          if (generation !== loadGenerationRef.current) return;
+          if (!subResponse.ok) return;
+          const subContent = await subResponse.text();
+          const fontBuffers = fontResponses
+            .filter((b): b is ArrayBuffer => b != null)
+            .map((b) => new Uint8Array(b));
+          jassubRef.current = new JASSUB({
+            video,
+            subContent,
+            fonts: fontBuffers,
+            canvas: subtitleCanvasRef.current ?? undefined,
+            timeOffset: subtitleDriftOffsetSeconds(video.currentTime),
+          });
+          await jassubRef.current.ready;
+        } catch {
+          jassubRef.current = null;
+        }
+      },
+      [subtitleCanvasRef, videoRef],
+    );
+
+    const setSubtitle = useCallback(
+      (index: number | null) => {
+        const session = sessionRef.current;
+        if (!session) return;
+        const track =
+          index == null ? null : session.subtitleTracks.find((t) => t.index === index) ?? null;
+        setState((s) => ({ ...s, activeSubtitleIndex: track?.index ?? null }));
+        void attachSubtitles(track, session.fontAttachments);
+      },
+      [attachSubtitles],
+    );
+
     const play = useCallback(async (episodeId: number, resume = true) => {
       const video = videoRef.current;
       if (!video) return;
@@ -435,6 +512,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
         positionSeconds: 0,
         durationSeconds: null,
         activeAudioIndex: null,
+        activeSubtitleIndex: null,
         buffering: true,
       });
 
@@ -460,11 +538,15 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
         startPositionRef.current = secondsFromTicks(start.startPositionTicks);
         lastPositionRef.current = startPositionRef.current;
         lastSaveAtRef.current = Date.now();
+        const selectedSub =
+          start.subtitleTracks.find((t) => t.index === start.selectedSubtitleIndex) ?? null;
         setState((s) => ({
           ...s,
           session: start,
           activeAudioIndex: start.selectedAudioIndex,
+          activeSubtitleIndex: selectedSub?.index ?? null,
         }));
+        if (selectedSub) void attachSubtitles(selectedSub, start.fontAttachments);
 
         report("/Sessions/Playing", buildStartPayload(start));
 
@@ -551,7 +633,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
         playInFlightRef.current = null;
       }
     }
-  }, [recoverMediaError, recoverStream, report, reportStopped, teardown, videoRef]);
+  }, [attachSubtitles, recoverMediaError, recoverStream, report, reportStopped, teardown, videoRef]);
 
   playRef.current = play;
 
@@ -560,7 +642,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     playInFlightRef.current = null;
     teardown();
     sessionRef.current = null;
-    setState({ status: "idle", error: null, session: null, positionSeconds: 0, durationSeconds: null, activeAudioIndex: null, buffering: false });
+    setState({ status: "idle", error: null, session: null, positionSeconds: 0, durationSeconds: null, activeAudioIndex: null, activeSubtitleIndex: null, buffering: false });
   }, [reportStopped, teardown]);
 
   useEffect(() => {
@@ -569,5 +651,5 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     return attachVideo(video);
   }, [attachVideo, videoRef]);
 
-  return { videoRef, state, play, close, setAudio };
+  return { videoRef, state, play, close, setSubtitle, setAudio };
 }

@@ -12,6 +12,7 @@ export interface PlayerContextValue {
   play: (episodeId: number, resume?: boolean) => Promise<void>;
   close: () => void;
   setAudio: (index: number) => Promise<void>;
+  setSubtitle: (index: number | null) => void;
   session: PlaybackStart | null;
   mode: "hidden" | "big" | "mini";
 }
@@ -38,6 +39,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const subtitleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
   const pendingSkipRef = useRef(0);
   const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -51,7 +53,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [router],
   );
 
-  const { state, play, close, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef });
+  const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef });
   const isWatchRoute = (pathname ?? "").startsWith("/watch/");
 
   const mode: PlayerContextValue["mode"] = isWatchRoute
@@ -60,8 +62,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       ? "mini"
       : "hidden";
   const value = useMemo<PlayerContextValue>(
-    () => ({ videoRef, state, play, close, setAudio, session: state.session, mode }),
-    [videoRef, state, play, close, setAudio, mode],
+    () => ({ videoRef, state, play, close, setAudio, setSubtitle, session: state.session, mode }),
+    [videoRef, state, play, close, setAudio, setSubtitle, mode],
   );
 
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -250,6 +252,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               autoPlay
               crossOrigin="anonymous"
               className="h-full w-full object-contain"
+            />
+            <canvas
+              ref={subtitleCanvasRef}
+              className="pointer-events-none absolute"
             />
           </div>
 
