@@ -8,20 +8,19 @@ using System.Threading.Tasks;
 
 // Jellyfin ffmpeg shim.
 //
-// Jellyfin (<= 10.11.11) passes integer `-hls_time 3` and
-// `-force_key_frames "expr:gte(t,n_forced*3)"` to ffmpeg. At fractional NTSC
-// framerates (23.976/29.97) ffmpeg can only cut segments on whole frames, so it
-// emits a mix of 72/71-frame segments while the HLS playlist advertises a
-// uniform 3.003s — the browser's timeline drifts ahead of the media and
-// client-rendered subtitles run progressively early (jellyfin#16730).
+// When Jellyfin restarts ffmpeg mid-video with `-ss` (resume / seek beyond the
+// transcoded buffer), the demuxer seeks to the nearest source keyframe, which
+// may be seconds before the target. Transcoded video is trimmed back to the
+// target by `accurate_seek`, but stream-copied audio is not — so the audio
+// content starts early and drifts against the video and the subtitles
+// (jellyfin#14194, fixed upstream in 12.0 by PR #16580).
 //
-// This shim rewrites those two args to the frame-aligned float
-// `ceil(N * fps) / fps` (3.003 for 23.976) and forwards everything else to the
-// real ffmpeg. See docs/adr/ for the decision.
+// This shim applies the same fix: a `noise` bitstream filter that drops copied
+// audio packets with PTS before the seek target, so audio and video start at
+// the same time. See docs/adr/ for the decision.
 internal static class Program
 {
     private const string RealFfmpeg = @"C:\Program Files\Jellyfin\Server\ffmpeg.exe";
-    private const string RealFfprobe = @"C:\Program Files\Jellyfin\Server\ffprobe.exe";
 
     private const uint JobObjectLimitKillOnJobClose = 0x2000;
     private const int JobObjectExtendedLimitInfoClass = 9;
@@ -32,12 +31,7 @@ internal static class Program
         var firstSpace = raw.IndexOf(' ');
         var args = firstSpace < 0 ? string.Empty : raw.Substring(firstSpace + 1).Trim();
 
-        var aligned = ComputeAlignedSegmentLength(args);
-        if (aligned != null)
-        {
-            args = Regex.Replace(args, @"\-hls_time\s+\d+", "-hls_time " + aligned);
-            args = Regex.Replace(args, @"n_forced\*\d+", "n_forced*" + aligned);
-        }
+        args = AddAudioSeekTrim(args);
 
         var psi = new ProcessStartInfo();
         psi.FileName = RealFfmpeg;
@@ -84,94 +78,25 @@ internal static class Program
         return proc.ExitCode;
     }
 
-    private static string ComputeAlignedSegmentLength(string args)
+    private static string AddAudioSeekTrim(string args)
     {
-        var segMatch = Regex.Match(args, @"\-hls_time\s+(\d+)");
-        if (!segMatch.Success)
+        var match = Regex.Match(args, @"(?<=\-ss\s)(\d{1,2}:\d{2}:\d{2}(?:\.\d+)?)");
+        if (!match.Success)
         {
-            return null;
+            return args;
         }
 
-        int segLen;
-        if (!int.TryParse(segMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out segLen))
+        TimeSpan seek;
+        if (!TimeSpan.TryParse(match.Value, CultureInfo.InvariantCulture, out seek))
         {
-            return null;
+            return args;
         }
 
-        var input = ExtractInput(args);
-        if (input == null)
-        {
-            return null;
-        }
+        var seconds = seek.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
+        var bsf = "-bsf:a \"noise=drop=lt(pts*tb\\," + seconds + ")\"";
 
-        var fps = ProbeFramerate(input);
-        if (fps <= 0)
-        {
-            return null;
-        }
-
-        // Only fractional framerates need realignment; integer framerates
-        // (24, 25, 30...) already divide evenly.
-        if (Math.Abs(fps - Math.Floor(fps + 0.001)) <= 0.001)
-        {
-            return null;
-        }
-
-        var aligned = Math.Ceiling(segLen * fps) / fps;
-        return aligned.ToString("0.######", CultureInfo.InvariantCulture);
-    }
-
-    private static string ExtractInput(string args)
-    {
-        var m = Regex.Match(args, @"\-i\s+(?:file:)?""([^""]+)""");
-        if (m.Success)
-        {
-            return m.Groups[1].Value;
-        }
-
-        m = Regex.Match(args, @"\-i\s+(\S+)");
-        return m.Success ? m.Groups[1].Value : null;
-    }
-
-    private static double ProbeFramerate(string input)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo();
-            psi.FileName = RealFfprobe;
-            psi.Arguments = "-v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=noprint_wrappers=1:nokey=1 -i \"" + input + "\"";
-            psi.UseShellExecute = false;
-            psi.CreateNoWindow = true;
-            psi.RedirectStandardOutput = true;
-            psi.RedirectStandardError = true;
-
-            var proc = Process.Start(psi);
-            var stdout = proc.StandardOutput.ReadToEnd();
-            proc.WaitForExit();
-
-            var m = Regex.Match(stdout, @"(\d+(?:\.\d+)?)\s*/\s*(\d+)");
-            if (m.Success)
-            {
-                double num = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
-                double den = double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
-                if (den > 0)
-                {
-                    return num / den;
-                }
-            }
-
-            m = Regex.Match(stdout, @"(\d+(?:\.\d+)?)");
-            if (m.Success)
-            {
-                return double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
-            }
-        }
-        catch
-        {
-            // If probing fails, fall through and leave the args untouched.
-        }
-
-        return 0;
+        var insertAt = match.Index + match.Length;
+        return args.Substring(0, insertAt) + " " + bsf + args.Substring(insertAt);
     }
 
     // Tie ffmpeg to this process's job object so that when Jellyfin kills the

@@ -14,7 +14,6 @@ import {
   ticksFromSeconds,
 } from "@/lib/player/save-policy";
 import { reanchorTarget } from "@/lib/player/reanchor";
-import { subtitleDriftOffsetSeconds } from "@/lib/player/subtitle-drift";
 
 const RECOVER_COOLDOWN_MS = 4000;
 const STALL_TIMEOUT_MS = 10_000;
@@ -171,9 +170,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
       const position = video.currentTime;
       lastPositionRef.current = position;
       setState((s) => ({ ...s, positionSeconds: position, durationSeconds: video.duration }));
-      if (jassubRef.current) {
-        jassubRef.current.timeOffset = subtitleDriftOffsetSeconds(position);
-      }
       if (shouldSaveNow(lastSaveAtRef.current, Date.now())) {
         reportProgress(position, video.paused);
       }
@@ -459,7 +455,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
             subContent,
             fonts: fontBuffers,
             canvas: subtitleCanvasRef.current ?? undefined,
-            timeOffset: subtitleDriftOffsetSeconds(video.currentTime),
           });
           await jassubRef.current.ready;
         } catch {
