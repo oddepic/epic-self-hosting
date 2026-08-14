@@ -100,6 +100,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
   const reanchoredRef = useRef(false);
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manifestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playInFlightRef = useRef<number | null>(null);
 
   const report = useCallback((path: string, body: Record<string, unknown>): void => {
     const session = sessionRef.current;
@@ -351,276 +352,289 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
 
     const generation = loadGenerationRef.current;
     try {
-      const { default: JASSUB } = await import("jassub");
-      const [subResponse, ...fontResponses] = await Promise.all([
-        fetch(track.url),
-        ...fonts.map((url) => fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null))),
-      ]);
-      if (generation !== loadGenerationRef.current) return;
-      if (!subResponse.ok) return;
+        const { default: JASSUB } = await import("jassub");
+        const [subResponse, ...fontResponses] = await Promise.all([
+          fetch(track.url),
+          ...fonts.map((url) => fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null))),
+        ]);
+        if (generation !== loadGenerationRef.current) return;
+        if (!subResponse.ok) return;
 
-      const subContent = await subResponse.text();
-      const fontBuffers = fontResponses.filter((b): b is ArrayBuffer => b != null).map((b) => new Uint8Array(b));
+        const subContent = await subResponse.text();
+        const fontBuffers = fontResponses.filter((b): b is ArrayBuffer => b != null).map((b) => new Uint8Array(b));
 
-      jassubRef.current = new JASSUB({
-        video,
-        subContent,
-        fonts: fontBuffers,
-        canvas: subtitleCanvasRef.current ?? undefined,
-        // Compensate Jellyfin's copied-AAC drift from the very first frame so
-        // the compensation can never be missed by a teardown/attach race.
-        timeOffset: subtitleDriftOffsetSeconds(video.currentTime),
-      });
-      await jassubRef.current.ready;
-    } catch {
-      jassubRef.current = null;
-    }
-  }, [subtitleCanvasRef, videoRef]);
-
-  const setSubtitle = useCallback(
-    (index: number | null) => {
-      const session = sessionRef.current;
-      if (!session) return;
-      const track = index == null ? null : session.subtitleTracks.find((t) => t.index === index) ?? null;
-      setState((s) => ({ ...s, activeSubtitleIndex: track?.isText ? track.index : null }));
-      if (!track || !track.isText) {
-        void attachSubtitles(null, []);
-        return;
-      }
-      void attachSubtitles(track, session.fontUrls);
-    },
-    [attachSubtitles],
-  );
-
-  const setAudio = useCallback(
-    async (index: number) => {
-      const session = sessionRef.current;
-      const video = videoRef.current;
-      if (!session || !video) return;
-      const currentTime = video.currentTime;
-
-      const res = await fetch("/api/playback/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          episodeId: session.episodeId,
-          resume: false,
-          audioStreamIndex: index,
-          subtitleStreamIndex: state.activeSubtitleIndex ?? session.selectedSubtitleIndex ?? null,
-        }),
-      });
-      if (!res.ok) return;
-      const start = (await res.json()) as PlaybackStart;
-      if (!start.url) return;
-
-      reportStopped(lastPositionRef.current);
-      sessionRef.current = start;
-      lastPositionRef.current = currentTime;
-      lastSaveAtRef.current = Date.now();
-      setState((s) => ({ ...s, session: start, activeAudioIndex: start.selectedAudioIndex }));
-
-      hlsRef.current?.destroy();
-      hlsRef.current = null;
-      if (manifestTimerRef.current != null) {
-        clearTimeout(manifestTimerRef.current);
-        manifestTimerRef.current = null;
-      }
-      if (stallTimerRef.current != null) {
-        clearTimeout(stallTimerRef.current);
-        stallTimerRef.current = null;
-      }
-      reanchoredRef.current = true;
-      video.removeAttribute("src");
-      video.load();
-
-      const needsHls = start.url.includes(".m3u8") || start.url.includes("master");
-      const canPlayNativeHls = !needsHls || video.canPlayType("application/vnd.apple.mpegurl") !== "";
-      const seekAfterReady = () => {
-        video.currentTime = currentTime;
-        video
-          .play()
-          .then(() => setState((s) => ({ ...s, status: "playing" })))
-          .catch(() => setState((s) => ({ ...s, status: "paused" })));
-      };
-      if (needsHls && !canPlayNativeHls) {
-        hlsPositionManagedRef.current = true;
-        const { default: Hls } = await import("hls.js");
-        if (!Hls.isSupported()) return;
-        const hls = new Hls({ startPosition: currentTime });
-        hlsRef.current = hls;
-        hls.loadSource(start.url);
-        hls.attachMedia(video);
-        manifestTimerRef.current = setTimeout(() => {
-          manifestTimerRef.current = null;
-          recoverStream(video);
-        }, MANIFEST_TIMEOUT_MS);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (manifestTimerRef.current != null) {
-            clearTimeout(manifestTimerRef.current);
-            manifestTimerRef.current = null;
-          }
-          seekAfterReady();
+        jassubRef.current = new JASSUB({
+          video,
+          subContent,
+          fonts: fontBuffers,
+          canvas: subtitleCanvasRef.current ?? undefined,
+          // Compensate Jellyfin's copied-AAC drift from the very first frame so
+          // the compensation can never be missed by a teardown/attach race.
+          timeOffset: subtitleDriftOffsetSeconds(video.currentTime),
         });
-        hls.on(Hls.Events.ERROR, (_event, data) => {
-          const isNetworkAuth =
-            data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-            (data as { response?: { code?: number } }).response?.code === 401;
-          if (isNetworkAuth) {
-            recoverStream(video);
-          } else if (data.fatal) {
-            recoverMediaError();
-          }
-        });
-      } else {
-        hlsPositionManagedRef.current = false;
-        video.src = start.url;
-        video.addEventListener("loadedmetadata", seekAfterReady, { once: true });
-        video.play().catch(() => {});
+        await jassubRef.current.ready;
+      } catch {
+        jassubRef.current = null;
       }
-    },
-    [reportStopped, recoverMediaError, recoverStream, state.activeSubtitleIndex, videoRef],
-  );
-  const play = useCallback(async (episodeId: number, resume = true) => {
-    const video = videoRef.current;
-    if (!video) return;
+    }, [subtitleCanvasRef, videoRef]);
 
-    // Always re-resolve the stream. Jellyfin invalidates the previous service
-    // token whenever a new one is minted (per-user single session), so any
-    // held-over URL — e.g. after a dev-server restart — is already dead.
-    // Re-resolving mints a fresh token and, thanks to single-flight auth,
-    // concurrent starts share it instead of killing each other.
-
-    if (sessionRef.current) {
-      reportStopped(lastPositionRef.current);
-    }
-    sessionRef.current = null;
-    reanchoredRef.current = false;
-    teardown();
-    const generation = ++loadGenerationRef.current;
-    setState({
-      status: "starting",
-      error: null,
-      session: null,
-      positionSeconds: 0,
-      durationSeconds: null,
-      activeSubtitleIndex: null,
-      activeAudioIndex: null,
-      buffering: true,
-    });
-
-    try {
-      const res = await fetch("/api/playback/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ episodeId, resume }),
-      });
-      if (generation !== loadGenerationRef.current) return;
-      if (!res.ok) {
-        setState((s) => ({ ...s, status: "error", error: "Could not start playback for this episode." }));
-        return;
-      }
-      const start = (await res.json()) as PlaybackStart;
-      if (generation !== loadGenerationRef.current) return;
-      if (!start.url) {
-        setState((s) => ({ ...s, status: "error", error: "No playable stream for this episode." }));
-        return;
-      }
-
-      sessionRef.current = start;
-      startPositionRef.current = secondsFromTicks(start.startPositionTicks);
-      lastPositionRef.current = startPositionRef.current;
-      lastSaveAtRef.current = Date.now();
-      const selectedSub = start.subtitleTracks.find((t) => t.index === start.selectedSubtitleIndex) ?? null;
-      setState((s) => ({
-        ...s,
-        session: start,
-        activeSubtitleIndex: selectedSub?.isText ? selectedSub.index : null,
-        activeAudioIndex: start.selectedAudioIndex,
-      }));
-
-      if (selectedSub?.isText) {
-        void attachSubtitles(selectedSub, start.fontUrls);
-      }
-
-      report("/Sessions/Playing", buildStartPayload(start));
-
-      const needsHls = start.url.includes(".m3u8") || start.url.includes("master");
-      const canPlayNativeHls =
-        !needsHls || video.canPlayType("application/vnd.apple.mpegurl") !== "";
-
-      if (needsHls && !canPlayNativeHls) {
-        hlsPositionManagedRef.current = true;
-        const { default: Hls } = await import("hls.js");
-        if (!Hls.isSupported()) {
-          sessionRef.current = null;
-          setState((s) => ({ ...s, status: "error", error: "HLS is not supported in this browser." }));
+    const setSubtitle = useCallback(
+      (index: number | null) => {
+        const session = sessionRef.current;
+        if (!session) return;
+        const track = index == null ? null : session.subtitleTracks.find((t) => t.index === index) ?? null;
+        setState((s) => ({ ...s, activeSubtitleIndex: track?.isText ? track.index : null }));
+        if (!track || !track.isText) {
+          void attachSubtitles(null, []);
           return;
         }
-        const hls = new Hls({
-          ...(startPositionRef.current > 0 ? { startPosition: startPositionRef.current } : {}),
-          // hls.js defaults / jellyfin-web alignment (issue 37). Earlier custom
-          // values (enableWorker:false, maxBufferHole:0.5, nudgeMaxRetry:5,
-          // backBufferLength:90) were added for seek append-failures; the
-          // defaults handle rapid seeks via the gap controller + worker.
-          // backBufferLength: 90,
-          // maxBufferLength: 30,
-          // maxMaxBufferLength: 90,
-          // enableWorker: false,
-          // nudgeMaxRetry: 5,
-          // maxBufferHole: 0.5,
+        void attachSubtitles(track, session.fontUrls);
+      },
+      [attachSubtitles],
+    );
+
+    const setAudio = useCallback(
+      async (index: number) => {
+        const session = sessionRef.current;
+        const video = videoRef.current;
+        if (!session || !video) return;
+        const currentTime = video.currentTime;
+
+        const res = await fetch("/api/playback/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            episodeId: session.episodeId,
+            resume: false,
+            audioStreamIndex: index,
+            subtitleStreamIndex: state.activeSubtitleIndex ?? session.selectedSubtitleIndex ?? null,
+          }),
         });
-        hlsRef.current = hls;
-        hls.loadSource(start.url);
-        hls.attachMedia(video);
-        // Manifest timeout: if MANIFEST_PARSED never fires (stale token 401,
-        // slow transcode start), re-resolve instead of hanging on "starting".
-        manifestTimerRef.current = setTimeout(() => {
+        if (!res.ok) return;
+        const start = (await res.json()) as PlaybackStart;
+        if (!start.url) return;
+
+        reportStopped(lastPositionRef.current);
+        sessionRef.current = start;
+        lastPositionRef.current = currentTime;
+        lastSaveAtRef.current = Date.now();
+        setState((s) => ({ ...s, session: start, activeAudioIndex: start.selectedAudioIndex }));
+
+        hlsRef.current?.destroy();
+        hlsRef.current = null;
+        if (manifestTimerRef.current != null) {
+          clearTimeout(manifestTimerRef.current);
           manifestTimerRef.current = null;
-          recoverStream(video);
-        }, MANIFEST_TIMEOUT_MS);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          if (manifestTimerRef.current != null) {
-            clearTimeout(manifestTimerRef.current);
+        }
+        if (stallTimerRef.current != null) {
+          clearTimeout(stallTimerRef.current);
+          stallTimerRef.current = null;
+        }
+        reanchoredRef.current = true;
+        video.removeAttribute("src");
+        video.load();
+
+        const needsHls = start.url.includes(".m3u8") || start.url.includes("master");
+        const canPlayNativeHls = !needsHls || video.canPlayType("application/vnd.apple.mpegurl") !== "";
+        const seekAfterReady = () => {
+          video.currentTime = currentTime;
+          video
+            .play()
+            .then(() => setState((s) => ({ ...s, status: "playing" })))
+            .catch(() => setState((s) => ({ ...s, status: "paused" })));
+        };
+        if (needsHls && !canPlayNativeHls) {
+          hlsPositionManagedRef.current = true;
+          const { default: Hls } = await import("hls.js");
+          if (!Hls.isSupported()) return;
+          const hls = new Hls({ startPosition: currentTime });
+          hlsRef.current = hls;
+          hls.loadSource(start.url);
+          hls.attachMedia(video);
+          manifestTimerRef.current = setTimeout(() => {
             manifestTimerRef.current = null;
+            recoverStream(video);
+          }, MANIFEST_TIMEOUT_MS);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (manifestTimerRef.current != null) {
+              clearTimeout(manifestTimerRef.current);
+              manifestTimerRef.current = null;
+            }
+            seekAfterReady();
+          });
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            const isNetworkAuth =
+              data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+              (data as { response?: { code?: number } }).response?.code === 401;
+            if (isNetworkAuth) {
+              recoverStream(video);
+            } else if (data.fatal) {
+              recoverMediaError();
+            }
+          });
+        } else {
+          hlsPositionManagedRef.current = false;
+          video.src = start.url;
+          video.addEventListener("loadedmetadata", seekAfterReady, { once: true });
+          video.play().catch(() => {});
+        }
+      },
+      [reportStopped, recoverMediaError, recoverStream, state.activeSubtitleIndex, videoRef],
+    );
+    const play = useCallback(async (episodeId: number, resume = true) => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      // StrictMode (dev) mounts the watch page twice, firing two play() calls
+      // for the same episode back-to-back. Without this guard the second call
+      // tears down what the first just built - including the JASSUB instance
+      // that the drift compensation updates on every timeupdate.
+      if (playInFlightRef.current === episodeId) return;
+      playInFlightRef.current = episodeId;
+      try {
+
+      // Always re-resolve the stream. Jellyfin invalidates the previous service
+      // token whenever a new one is minted (per-user single session), so any
+      // held-over URL — e.g. after a dev-server restart — is already dead.
+      // Re-resolving mints a fresh token and, thanks to single-flight auth,
+      // concurrent starts share it instead of killing each other.
+
+      if (sessionRef.current) {
+        reportStopped(lastPositionRef.current);
+      }
+      sessionRef.current = null;
+      reanchoredRef.current = false;
+      teardown();
+      const generation = ++loadGenerationRef.current;
+      setState({
+        status: "starting",
+        error: null,
+        session: null,
+        positionSeconds: 0,
+        durationSeconds: null,
+        activeSubtitleIndex: null,
+        activeAudioIndex: null,
+        buffering: true,
+      });
+
+      try {
+        const res = await fetch("/api/playback/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ episodeId, resume }),
+        });
+        if (generation !== loadGenerationRef.current) return;
+        if (!res.ok) {
+          setState((s) => ({ ...s, status: "error", error: "Could not start playback for this episode." }));
+          return;
+        }
+        const start = (await res.json()) as PlaybackStart;
+        if (generation !== loadGenerationRef.current) return;
+        if (!start.url) {
+          setState((s) => ({ ...s, status: "error", error: "No playable stream for this episode." }));
+          return;
+        }
+
+        sessionRef.current = start;
+        startPositionRef.current = secondsFromTicks(start.startPositionTicks);
+        lastPositionRef.current = startPositionRef.current;
+        lastSaveAtRef.current = Date.now();
+        const selectedSub = start.subtitleTracks.find((t) => t.index === start.selectedSubtitleIndex) ?? null;
+        setState((s) => ({
+          ...s,
+          session: start,
+          activeSubtitleIndex: selectedSub?.isText ? selectedSub.index : null,
+          activeAudioIndex: start.selectedAudioIndex,
+        }));
+
+        if (selectedSub?.isText) {
+          void attachSubtitles(selectedSub, start.fontUrls);
+        }
+
+        report("/Sessions/Playing", buildStartPayload(start));
+
+        const needsHls = start.url.includes(".m3u8") || start.url.includes("master");
+        const canPlayNativeHls =
+          !needsHls || video.canPlayType("application/vnd.apple.mpegurl") !== "";
+
+        if (needsHls && !canPlayNativeHls) {
+          hlsPositionManagedRef.current = true;
+          const { default: Hls } = await import("hls.js");
+          if (!Hls.isSupported()) {
+            sessionRef.current = null;
+            setState((s) => ({ ...s, status: "error", error: "HLS is not supported in this browser." }));
+            return;
+          }
+          const hls = new Hls({
+            ...(startPositionRef.current > 0 ? { startPosition: startPositionRef.current } : {}),
+            // hls.js defaults / jellyfin-web alignment (issue 37). Earlier custom
+            // values (enableWorker:false, maxBufferHole:0.5, nudgeMaxRetry:5,
+            // backBufferLength:90) were added for seek append-failures; the
+            // defaults handle rapid seeks via the gap controller + worker.
+            // backBufferLength: 90,
+            // maxBufferLength: 30,
+            // maxMaxBufferLength: 90,
+            // enableWorker: false,
+            // nudgeMaxRetry: 5,
+            // maxBufferHole: 0.5,
+          });
+          hlsRef.current = hls;
+          hls.loadSource(start.url);
+          hls.attachMedia(video);
+          // Manifest timeout: if MANIFEST_PARSED never fires (stale token 401,
+          // slow transcode start), re-resolve instead of hanging on "starting".
+          manifestTimerRef.current = setTimeout(() => {
+            manifestTimerRef.current = null;
+            recoverStream(video);
+          }, MANIFEST_TIMEOUT_MS);
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (manifestTimerRef.current != null) {
+              clearTimeout(manifestTimerRef.current);
+              manifestTimerRef.current = null;
+            }
+            video
+              .play()
+              .then(() => setState((s) => ({ ...s, status: "playing" })))
+              // Autoplay can be blocked on a fresh page load (no user gesture yet).
+              // Reflect the real state so the play button is honest, not a lie.
+              .catch(() => setState((s) => ({ ...s, status: "paused" })));
+          });
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            const isNetworkAuth =
+              data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+              (data as { response?: { code?: number } }).response?.code === 401;
+            if (isNetworkAuth) {
+              // Stale token → full re-resolve mints a fresh stream.
+              recoverStream(video);
+            } else if (data.fatal) {
+              // Buffer/media churn (e.g. rapid seeks) → cheap in-place recovery.
+              recoverMediaError();
+            }
+          });
+        } else {
+          hlsPositionManagedRef.current = false;
+          video.src = start.url;
+          if (startPositionRef.current > 0 && video.currentTime < 1) {
+            video.currentTime = startPositionRef.current;
           }
           video
             .play()
             .then(() => setState((s) => ({ ...s, status: "playing" })))
-            // Autoplay can be blocked on a fresh page load (no user gesture yet).
-            // Reflect the real state so the play button is honest, not a lie.
             .catch(() => setState((s) => ({ ...s, status: "paused" })));
-        });
-        hls.on(Hls.Events.ERROR, (_event, data) => {
-          const isNetworkAuth =
-            data.type === Hls.ErrorTypes.NETWORK_ERROR &&
-            (data as { response?: { code?: number } }).response?.code === 401;
-          if (isNetworkAuth) {
-            // Stale token → full re-resolve mints a fresh stream.
-            recoverStream(video);
-          } else if (data.fatal) {
-            // Buffer/media churn (e.g. rapid seeks) → cheap in-place recovery.
-            recoverMediaError();
-          }
-        });
-      } else {
-        hlsPositionManagedRef.current = false;
-        video.src = start.url;
-        if (startPositionRef.current > 0 && video.currentTime < 1) {
-          video.currentTime = startPositionRef.current;
         }
-        video
-          .play()
-          .then(() => setState((s) => ({ ...s, status: "playing" })))
-          .catch(() => setState((s) => ({ ...s, status: "paused" })));
+      } catch (err) {
+        if (generation !== loadGenerationRef.current) return;
+        sessionRef.current = null;
+        setState((s) => ({
+          ...s,
+          status: "error",
+          error: err instanceof Error ? err.message : "Playback failed",
+        }));
       }
-    } catch (err) {
-      if (generation !== loadGenerationRef.current) return;
-      sessionRef.current = null;
-      setState((s) => ({
-        ...s,
-        status: "error",
-        error: err instanceof Error ? err.message : "Playback failed",
-      }));
+    } finally {
+      if (playInFlightRef.current === episodeId) {
+        playInFlightRef.current = null;
+      }
     }
   }, [attachSubtitles, recoverMediaError, recoverStream, report, reportStopped, teardown, videoRef]);
 
@@ -628,6 +642,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
 
   const close = useCallback(() => {
     reportStopped(lastPositionRef.current);
+    playInFlightRef.current = null;
     teardown();
     sessionRef.current = null;
     setState({ status: "idle", error: null, session: null, positionSeconds: 0, durationSeconds: null, activeSubtitleIndex: null, activeAudioIndex: null, buffering: false });
