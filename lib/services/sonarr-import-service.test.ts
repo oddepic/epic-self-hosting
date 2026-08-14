@@ -165,7 +165,7 @@ describe("SonarrImportService.importFiles", () => {
     expect(first).toMatchObject({
       seriesId: 7,
       episodeIds: [101],
-      importMode: "copy",
+      importMode: "auto",
       releaseGroup: "Group",
     });
     expect(first.path).toContain("S01E01");

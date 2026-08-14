@@ -151,7 +151,7 @@ export class SonarrHttpClient implements SonarrClient {
     return this.request("/command", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "ManualImport", importMode: "copy", files }),
+      body: JSON.stringify({ name: "ManualImport", importMode: "auto", files }),
     });
   }
 
