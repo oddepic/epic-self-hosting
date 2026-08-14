@@ -460,7 +460,11 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
         startPositionRef.current = secondsFromTicks(start.startPositionTicks);
         lastPositionRef.current = startPositionRef.current;
         lastSaveAtRef.current = Date.now();
-
+        setState((s) => ({
+          ...s,
+          session: start,
+          activeAudioIndex: start.selectedAudioIndex,
+        }));
 
         report("/Sessions/Playing", buildStartPayload(start));
 
