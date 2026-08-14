@@ -2,7 +2,7 @@ import { and, eq, gt, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { animes, episodes, seasons } from "../db/schema";
 import type { JellyfinClient } from "../integrations/types";
-import { TrackPreferenceService } from "./track-preference-service";
+import { TrackPreferenceService, isTextSubtitleCodec } from "./track-preference-service";
 
 export class EpisodeNotAvailableError extends Error {
   constructor() {
@@ -15,6 +15,58 @@ export interface AudioTrackInfo {
   language: string | null;
   codec: string | null;
   displayTitle: string | null;
+}
+
+export interface SubtitleTrackInfo {
+  index: number;
+  language: string | null;
+  codec: string | null;
+  isForced: boolean;
+  isDefault: boolean;
+  displayTitle: string | null;
+  deliveryUrl: string;
+}
+
+export interface FontAttachmentInfo {
+  index: number;
+  fileName: string | null;
+  mimeType: string | null;
+  deliveryUrl: string;
+}
+
+export function subtitleFormat(codec: string | null): string | null {
+  if (!codec) return null;
+  const c = codec.toLowerCase();
+  if (c === "subrip") return "srt";
+  if (c === "webvtt") return "vtt";
+  return c;
+}
+
+function trimTrailingSlash(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
+}
+
+export function buildSubtitleUrl(
+  baseUrl: string,
+  itemId: string,
+  mediaSourceId: string,
+  index: number,
+  codec: string | null,
+  token: string,
+): string | null {
+  const format = subtitleFormat(codec);
+  if (!format) return null;
+  return `${trimTrailingSlash(baseUrl)}/Videos/${itemId}/${mediaSourceId}/Subtitles/${index}/0/Stream.${format}?ApiKey=${token}`;
+}
+
+export function buildAttachmentUrl(
+  baseUrl: string,
+  itemId: string,
+  mediaSourceId: string,
+  index: number,
+  token: string,
+): string {
+  return `${trimTrailingSlash(baseUrl)}/Videos/${itemId}/${mediaSourceId}/Attachments/${index}?ApiKey=${token}`;
 }
 
 export interface PlaybackStartResult {
@@ -31,6 +83,9 @@ export interface PlaybackStartResult {
   animeTitle: string | null;
   audioTracks: AudioTrackInfo[];
   selectedAudioIndex: number | null;
+  subtitleTracks: SubtitleTrackInfo[];
+  fontAttachments: FontAttachmentInfo[];
+  selectedSubtitleIndex: number | null;
 }
 
 export class PlaybackService {
@@ -90,6 +145,48 @@ export class PlaybackService {
         displayTitle: s.displayTitle,
       }) satisfies AudioTrackInfo);
 
+    const mediaSourceId = media.mediaSourceId ?? episode.jellyfinItemId;
+    const subtitleTracks = streams
+      .filter((s) => s.type === "Subtitle" && isTextSubtitleCodec(s.codec))
+      .flatMap((s) => {
+        const deliveryUrl = buildSubtitleUrl(
+          this.config.jellyfinUrl,
+          episode.jellyfinItemId!,
+          mediaSourceId,
+          s.index,
+          s.codec,
+          auth.accessToken,
+        );
+        if (!deliveryUrl) return [];
+        return [
+          {
+            index: s.index,
+            language: s.language,
+            codec: s.codec,
+            isForced: s.isForced,
+            isDefault: s.isDefault,
+            displayTitle: s.displayTitle,
+            deliveryUrl,
+          } satisfies SubtitleTrackInfo,
+        ];
+      });
+
+    const fontAttachments = media.attachments.map(
+      (a) =>
+        ({
+          index: a.index,
+          fileName: a.fileName,
+          mimeType: a.mimeType,
+          deliveryUrl: buildAttachmentUrl(
+            this.config.jellyfinUrl,
+            episode.jellyfinItemId!,
+            mediaSourceId,
+            a.index,
+            auth.accessToken,
+          ),
+        }) satisfies FontAttachmentInfo,
+    );
+
     const playbackInfo = await this.jellyfin.getPlaybackInfo(
       episode.jellyfinItemId,
       auth.userId,
@@ -112,6 +209,9 @@ export class PlaybackService {
       animeTitle: anime?.titleRomaji ?? anime?.titleEnglish ?? null,
       audioTracks,
       selectedAudioIndex: audioStreamIndex,
+      subtitleTracks,
+      fontAttachments,
+      selectedSubtitleIndex: match.subtitleStreamIndex ?? null,
     };
   }
 

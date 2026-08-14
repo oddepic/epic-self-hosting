@@ -9,14 +9,33 @@ export interface TrackPreference {
   subtitleForced: boolean;
 }
 
+export const SUBTITLE_OFF = "off";
+
+const TEXT_SUBTITLE_CODECS = new Set([
+  "ass",
+  "ssa",
+  "srt",
+  "subrip",
+  "vtt",
+  "webvtt",
+  "mov_text",
+  "text",
+  "ttml",
+]);
+
+export function isTextSubtitleCodec(codec: string | null): boolean {
+  return codec != null && TEXT_SUBTITLE_CODECS.has(codec.toLowerCase());
+}
+
 export const DEFAULT_PREFERENCE: TrackPreference = {
   audioLanguage: "jpn",
-  subtitleLanguage: null,
+  subtitleLanguage: "eng",
   subtitleForced: false,
 };
 
 export interface StreamMatch {
   audioStreamIndex?: number;
+  subtitleStreamIndex?: number;
 }
 
 const LANGUAGE_ALIASES: Record<string, string> = {
@@ -73,7 +92,38 @@ export class TrackPreferenceService {
       ? this.pickStream(streams, "Audio", audio, false)
       : undefined;
 
-    return { audioStreamIndex: audioIndex };
+    const subtitleIndex = this.pickSubtitle(streams, pref);
+
+    return { audioStreamIndex: audioIndex, subtitleStreamIndex: subtitleIndex };
+  }
+
+  private pickSubtitle(streams: JellyfinMediaStream[], pref: TrackPreference): number | undefined {
+    if (pref.subtitleLanguage === SUBTITLE_OFF) return undefined;
+    const text = streams.filter(
+      (s) => s.type === "Subtitle" && isTextSubtitleCodec(s.codec),
+    );
+    if (text.length === 0) return undefined;
+
+    const lang = normalizeLanguage(pref.subtitleLanguage);
+    if (lang) {
+      const sameLang = text.filter((s) => normalizeLanguage(s.language) === lang);
+      if (sameLang.length > 0) {
+        const exact = sameLang.filter((s) => s.isForced === pref.subtitleForced);
+        if (exact.length > 0) return this.pickPreferred(exact);
+        if (pref.subtitleForced) {
+          const forced = text.filter((s) => s.isForced);
+          return this.pickPreferred(forced.length > 0 ? forced : text);
+        }
+      }
+    }
+
+    const nonForced = text.filter((s) => !s.isForced);
+    return this.pickPreferred(nonForced.length > 0 ? nonForced : text);
+  }
+
+  private pickPreferred(streams: JellyfinMediaStream[]): number | undefined {
+    const preferred = streams.find((s) => s.isDefault);
+    return (preferred ?? streams[0])?.index;
   }
 
   private pickStream(

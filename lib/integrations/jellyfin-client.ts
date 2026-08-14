@@ -44,7 +44,7 @@ function isUnauthorized(error: unknown): boolean {
   );
 }
 
-const WEB_DEVICE_PROFILE = {
+export const WEB_DEVICE_PROFILE = {
   MaxStreamingBitrate: 120_000_000,
   DirectPlayProfiles: [
     { Container: "mp4", VideoCodec: "h264", AudioCodec: "aac", Type: DlnaProfileType.Video },
@@ -52,7 +52,7 @@ const WEB_DEVICE_PROFILE = {
   ],
   TranscodingProfiles: [
     {
-      Container: "m3u8",
+      Container: "ts",
       Type: DlnaProfileType.Video,
       AudioCodec: "aac",
       VideoCodec: "h264",
