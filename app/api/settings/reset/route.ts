@@ -16,7 +16,7 @@ export async function POST() {
   );
   const sonarr = new SonarrHttpClient(config.sonarrUrl, config.sonarrApiKey);
 
-  const service = new ResetService(db, jellyfin, sonarr);
+  const service = new ResetService(db, jellyfin, sonarr, config.sonarrRootFolder);
   try {
     const result = await service.reset();
     return NextResponse.json({ ok: true, ...result });
