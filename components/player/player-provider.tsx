@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, AudioLines, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, Volume1, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, Volume1, Volume2, VolumeX, X } from "lucide-react";
 import { usePlayerEngine, type PlaybackStart, type PlayerState } from "./use-player-engine";
 
 export interface PlayerContextValue {
@@ -71,6 +71,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [dragFraction, setDragFraction] = useState<number | null>(null);
   const [volume, setVolume] = useState(1);
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
+  const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controlsHoveredRef = useRef(false);
 
@@ -131,6 +132,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       void setAudio(index);
     },
     [setAudio],
+  );
+
+  const onPickSubtitle = useCallback(
+    (index: number | null) => {
+      setSubtitleMenuOpen(false);
+      setSubtitle(index);
+    },
+    [setSubtitle],
   );
 
   const skip = useCallback(
@@ -418,7 +427,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
                   <div className="relative">
                     <button
-                      onClick={() => setAudioMenuOpen((o) => !o)}
+                      onClick={() => {
+                        setAudioMenuOpen((o) => !o);
+                        setSubtitleMenuOpen(false);
+                      }}
                       aria-label="Audio track"
                       className={`rounded-lg p-2 transition-colors hover:bg-surface-hover ${
                         audioMenuOpen ? "text-accent" : "text-text-secondary hover:text-text-primary"
@@ -434,6 +446,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                             onClick={() => onPickAudio(track.index)}
                             className={`w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
                               state.activeAudioIndex === track.index ? "text-accent" : "text-text-secondary"
+                            }`}
+                          >
+                            {track.displayTitle ?? track.language ?? `Track ${track.index}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+
+                  <div className="relative">
+                    <button
+                      onClick={() => {
+                        setSubtitleMenuOpen((o) => !o);
+                        setAudioMenuOpen(false);
+                      }}
+                      aria-label="Subtitle track"
+                      className={`rounded-lg p-2 transition-colors hover:bg-surface-hover ${
+                        subtitleMenuOpen ? "text-accent" : "text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      <Captions className="h-5 w-5" aria-hidden />
+                    </button>
+                    {subtitleMenuOpen && (
+                      <div className="absolute bottom-12 right-0 max-h-64 w-56 overflow-y-auto rounded-xl border border-border-strong bg-surface p-1">
+                        <button
+                          onClick={() => onPickSubtitle(null)}
+                          className={`w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
+                            state.activeSubtitleIndex === null ? "text-accent" : "text-text-secondary"
+                          }`}
+                        >
+                          Off
+                        </button>
+                        {state.session?.subtitleTracks.map((track) => (
+                          <button
+                            key={track.index}
+                            onClick={() => onPickSubtitle(track.index)}
+                            className={`w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
+                              state.activeSubtitleIndex === track.index ? "text-accent" : "text-text-secondary"
                             }`}
                           >
                             {track.displayTitle ?? track.language ?? `Track ${track.index}`}
