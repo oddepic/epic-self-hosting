@@ -187,12 +187,15 @@ export class PlaybackService {
         }) satisfies FontAttachmentInfo,
     );
 
+    const burnInSubtitleIndex = subtitleTracks.length === 0 ? match.burnInSubtitleStreamIndex : undefined;
+
     const playbackInfo = await this.jellyfin.getPlaybackInfo(
       episode.jellyfinItemId,
       auth.userId,
       auth.accessToken,
       startPositionTicks,
       audioStreamIndex ?? undefined,
+      burnInSubtitleIndex,
     );
 
     return {

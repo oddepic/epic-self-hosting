@@ -129,6 +129,7 @@ export class JellyfinSdkClient implements JellyfinClient {
     accessToken: string,
     startPositionTicks: number,
     audioStreamIndex?: number,
+    subtitleStreamIndex?: number,
   ): Promise<JellyfinPlaybackInfo> {
     return this.withFreshAuth(accessToken, async (token) => {
       const api = new Jellyfin({
@@ -148,6 +149,9 @@ export class JellyfinSdkClient implements JellyfinClient {
           EnableDirectPlay: true,
           EnableDirectStream: true,
           EnableTranscoding: true,
+          ...(subtitleStreamIndex !== undefined
+            ? { SubtitleStreamIndex: subtitleStreamIndex, AlwaysBurnInSubtitleWhenTranscoding: true }
+            : {}),
         },
       });
 

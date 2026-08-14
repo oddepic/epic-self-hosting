@@ -41,7 +41,7 @@ describe("TrackPreferenceService.matchStreams", () => {
       subtitleLanguage: null,
       subtitleForced: false,
     });
-    expect(result).toEqual({ audioStreamIndex: 1, subtitleStreamIndex: undefined });
+    expect(result).toEqual({ audioStreamIndex: 1, subtitleStreamIndex: undefined, burnInSubtitleStreamIndex: undefined });
   });
 
   it("matches audio by a 2-letter language code", () => {
@@ -79,7 +79,7 @@ describe("TrackPreferenceService.matchStreams", () => {
       subtitleLanguage: "spa",
       subtitleForced: false,
     });
-    expect(result).toEqual({ audioStreamIndex: undefined, subtitleStreamIndex: undefined });
+    expect(result).toEqual({ audioStreamIndex: undefined, subtitleStreamIndex: undefined, burnInSubtitleStreamIndex: undefined });
   });
 
   it("prefers the default track among multiple language matches", () => {
@@ -180,6 +180,29 @@ describe("TrackPreferenceService.matchStreams subtitles", () => {
       subtitleForced: false,
     });
     expect(result.subtitleStreamIndex).toBeUndefined();
+  });
+
+  it("matches an image subtitle by language and forced flag for burn-in", () => {
+    const streams = [
+      makeSubtitle({ index: 3, language: "eng", codec: "pgs", isForced: false, isDefault: true }),
+      makeSubtitle({ index: 4, language: "spa", codec: "pgs", isForced: false }),
+    ];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "eng",
+      subtitleForced: false,
+    });
+    expect(result.burnInSubtitleStreamIndex).toBe(3);
+  });
+
+  it("returns no burn-in index when the preference is off", () => {
+    const streams = [makeSubtitle({ index: 3, language: "eng", codec: "pgs", isForced: false })];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "off",
+      subtitleForced: false,
+    });
+    expect(result.burnInSubtitleStreamIndex).toBeUndefined();
   });
 });
 

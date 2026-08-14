@@ -36,6 +36,7 @@ export const DEFAULT_PREFERENCE: TrackPreference = {
 export interface StreamMatch {
   audioStreamIndex?: number;
   subtitleStreamIndex?: number;
+  burnInSubtitleStreamIndex?: number;
 }
 
 const LANGUAGE_ALIASES: Record<string, string> = {
@@ -93,8 +94,33 @@ export class TrackPreferenceService {
       : undefined;
 
     const subtitleIndex = this.pickSubtitle(streams, pref);
+    const burnInSubtitleIndex = this.pickBurnInSubtitle(streams, pref);
 
-    return { audioStreamIndex: audioIndex, subtitleStreamIndex: subtitleIndex };
+    return {
+      audioStreamIndex: audioIndex,
+      subtitleStreamIndex: subtitleIndex,
+      burnInSubtitleStreamIndex: burnInSubtitleIndex,
+    };
+  }
+
+  private pickBurnInSubtitle(streams: JellyfinMediaStream[], pref: TrackPreference): number | undefined {
+    if (pref.subtitleLanguage === SUBTITLE_OFF) return undefined;
+    const images = streams.filter(
+      (s) => s.type === "Subtitle" && !isTextSubtitleCodec(s.codec),
+    );
+    if (images.length === 0) return undefined;
+
+    const lang = normalizeLanguage(pref.subtitleLanguage);
+    if (lang) {
+      const sameLang = images.filter((s) => normalizeLanguage(s.language) === lang);
+      if (sameLang.length > 0) {
+        const exact = sameLang.filter((s) => s.isForced === pref.subtitleForced);
+        return this.pickPreferred(exact.length > 0 ? exact : sameLang);
+      }
+    }
+
+    const nonForced = images.filter((s) => !s.isForced);
+    return this.pickPreferred(nonForced.length > 0 ? nonForced : images);
   }
 
   private pickSubtitle(streams: JellyfinMediaStream[], pref: TrackPreference): number | undefined {
