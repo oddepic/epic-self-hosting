@@ -39,8 +39,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [settingUpSonarr, setSettingUpSonarr] = useState(false);
   const [sonarrSetupResult, setSonarrSetupResult] = useState<string | null>(null);
-  const [prefAudio, setPrefAudio] = useState("");
-  const [prefSaved, setPrefSaved] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetResult, setResetResult] = useState<string | null>(null);
   const [resetStatus, setResetStatus] = useState<ResetStatus | null>(null);
@@ -184,29 +182,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
     }
   }
 
-  async function onSavePreferences() {
-    setPrefSaved(false);
-    const res = await fetch("/api/preferences", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        audioLanguage: prefAudio || null,
-      }),
-    });
-    if (res.ok) setPrefSaved(true);
-  }
-
-  async function onLoadPreferences() {
-    setPrefSaved(false);
-    const res = await fetch("/api/preferences");
-    if (res.ok) {
-      const body = (await res.json()) as {
-        preference: { audioLanguage: string | null; subtitleLanguage: string | null; subtitleForced: boolean } | null;
-      };
-      setPrefAudio(body.preference?.audioLanguage ?? "");
-    }
-  }
-
   async function onHardReset() {
     if (!window.confirm("Hard reset? This removes ALL Sonarr series and empties the anime folder (the folder itself is kept), purges the Jellyfin library, and wipes the app database — back to a brand-new user.")) {
       return;
@@ -232,25 +207,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
 
   return (
     <div className="max-w-2xl">
-      <SettingSection title="Playback">
-        <SettingRow label="Audio language" description="ISO-639 code applied at playback (jpn, spa, eng…).">
-          <Input
-            type="text"
-            value={prefAudio}
-            onChange={(e) => setPrefAudio(e.target.value)}
-            placeholder="jpn"
-            className="w-28"
-          />
-        </SettingRow>
-        <SettingRow label="Track preferences">
-          <Button onClick={onLoadPreferences}>Load</Button>
-          <Button variant="primary" onClick={onSavePreferences}>
-            Save
-          </Button>
-          {prefSaved && <span className="text-xs text-success">Saved.</span>}
-        </SettingRow>
-      </SettingSection>
-
       <SettingSection title="Integrations">
         <SettingRow label="MyAnimeList" description="Status changes and completed episodes push automatically while connected.">
           <ConnectionStatus linked={linked} />

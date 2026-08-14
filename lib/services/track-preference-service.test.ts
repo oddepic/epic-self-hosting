@@ -257,3 +257,39 @@ describe("TrackPreferenceService.getPreferenceForEpisode", () => {
     });
   });
 });
+
+describe("TrackPreferenceService save + match round-trip", () => {
+  let db: Db;
+  let service: TrackPreferenceService;
+  let userId: number;
+
+  beforeEach(() => {
+    db = createDb(":memory:");
+    service = new TrackPreferenceService(db);
+    userId = db
+      .insert(users)
+      .values({ username: "admin", passwordHash: hashPassword("x"), preferences: {}, createdAt: 1 })
+      .returning()
+      .get().id;
+  });
+
+  it("re-matches a saved subtitle signature on a different episode's streams", () => {
+    service.savePreference(userId, { audioLanguage: "jpn", subtitleLanguage: "spa", subtitleForced: false });
+    const otherEpisodeStreams = [
+      makeAudio({ index: 0, language: "jpn" }),
+      makeSubtitle({ index: 7, language: "spa", isForced: false }),
+      makeSubtitle({ index: 8, language: "eng", isForced: false }),
+    ];
+    const pref = service.getPreferenceForEpisode(userId);
+    const match = service.matchStreams(otherEpisodeStreams, pref);
+    expect(match.subtitleStreamIndex).toBe(7);
+    expect(match.audioStreamIndex).toBe(0);
+  });
+
+  it("keeps subtitles off after persisting the off sentinel", () => {
+    service.savePreference(userId, { audioLanguage: "jpn", subtitleLanguage: "off", subtitleForced: false });
+    const pref = service.getPreferenceForEpisode(userId);
+    const match = service.matchStreams([makeSubtitle({ index: 7, language: "eng", isForced: false })], pref);
+    expect(match.subtitleStreamIndex).toBeUndefined();
+  });
+});

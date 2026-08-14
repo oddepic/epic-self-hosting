@@ -35,6 +35,14 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function saveTrackPreference(body: Record<string, unknown>): void {
+  void fetch("/api/preferences", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -130,16 +138,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     (index: number) => {
       setAudioMenuOpen(false);
       void setAudio(index);
+      const track = state.session?.audioTracks.find((t) => t.index === index);
+      if (track?.language) saveTrackPreference({ audioLanguage: track.language });
     },
-    [setAudio],
+    [setAudio, state.session],
   );
 
   const onPickSubtitle = useCallback(
     (index: number | null) => {
       setSubtitleMenuOpen(false);
       setSubtitle(index);
+      const track =
+        index == null ? null : (state.session?.subtitleTracks.find((t) => t.index === index) ?? null);
+      saveTrackPreference(
+        track
+          ? { subtitleLanguage: track.language, subtitleForced: track.isForced }
+          : { subtitleLanguage: "off", subtitleForced: false },
+      );
     },
-    [setSubtitle],
+    [setSubtitle, state.session],
   );
 
   const skip = useCallback(
