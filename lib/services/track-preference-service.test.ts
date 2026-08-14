@@ -22,10 +22,6 @@ function makeAudio(overrides: Partial<JellyfinMediaStream> = {}): JellyfinMediaS
   return makeStream({ type: "Audio", ...overrides });
 }
 
-function makeSub(overrides: Partial<JellyfinMediaStream> = {}): JellyfinMediaStream {
-  return makeStream({ type: "Subtitle", codec: "subrip", ...overrides });
-}
-
 describe("TrackPreferenceService.matchStreams", () => {
   let db: Db;
   let service: TrackPreferenceService;
@@ -45,7 +41,7 @@ describe("TrackPreferenceService.matchStreams", () => {
       subtitleLanguage: null,
       subtitleForced: false,
     });
-    expect(result).toEqual({ audioStreamIndex: 1, subtitleStreamIndex: undefined });
+    expect(result).toEqual({ audioStreamIndex: 1 });
   });
 
   it("matches audio by a 2-letter language code", () => {
@@ -74,54 +70,16 @@ describe("TrackPreferenceService.matchStreams", () => {
     expect(result.audioStreamIndex).toBe(1);
   });
 
-  it("matches subtitle tracks carrying a BCP-47 language tag", () => {
-    const streams = [
-      makeSub({ index: 2, language: "es-ES", isForced: false }),
-    ];
-    const result = service.matchStreams(streams, {
-      audioLanguage: "jpn",
-      subtitleLanguage: "spa",
-      subtitleForced: false,
-    });
-    expect(result.subtitleStreamIndex).toBe(2);
-  });
-
-  it("matches subtitle by language and forced flag", () => {
-    const streams = [
-      makeSub({ index: 2, language: "eng", isForced: false }),
-      makeSub({ index: 3, language: "spa", isForced: true }),
-    ];
-    const result = service.matchStreams(streams, {
-      audioLanguage: "jpn",
-      subtitleLanguage: "spa",
-      subtitleForced: true,
-    });
-    expect(result.subtitleStreamIndex).toBe(3);
-  });
-
-  it("falls back to a language-only subtitle match when no forced track exists", () => {
-    const streams = [
-      makeSub({ index: 2, language: "spa", isForced: false }),
-    ];
-    const result = service.matchStreams(streams, {
-      audioLanguage: "jpn",
-      subtitleLanguage: "spa",
-      subtitleForced: true,
-    });
-    expect(result.subtitleStreamIndex).toBe(2);
-  });
-
   it("returns undefined indexes when the preferred language is absent", () => {
     const streams = [
       makeAudio({ index: 0, language: "eng" }),
-      makeSub({ index: 1, language: "eng" }),
     ];
     const result = service.matchStreams(streams, {
       audioLanguage: "fra",
       subtitleLanguage: "spa",
       subtitleForced: false,
     });
-    expect(result).toEqual({ audioStreamIndex: undefined, subtitleStreamIndex: undefined });
+    expect(result).toEqual({ audioStreamIndex: undefined });
   });
 
   it("prefers the default track among multiple language matches", () => {

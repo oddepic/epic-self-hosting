@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, Volume1, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, Volume1, Volume2, VolumeX, X } from "lucide-react";
 import { usePlayerEngine, type PlaybackStart, type PlayerState } from "./use-player-engine";
 
 export interface PlayerContextValue {
@@ -11,7 +11,6 @@ export interface PlayerContextValue {
   state: PlayerState;
   play: (episodeId: number, resume?: boolean) => Promise<void>;
   close: () => void;
-  setSubtitle: (index: number | null) => void;
   setAudio: (index: number) => Promise<void>;
   session: PlaybackStart | null;
   mode: "hidden" | "big" | "mini";
@@ -39,7 +38,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const subtitleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
   const pendingSkipRef = useRef(0);
   const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -53,7 +51,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [router],
   );
 
-  const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef });
+  const { state, play, close, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef });
   const isWatchRoute = (pathname ?? "").startsWith("/watch/");
 
   const mode: PlayerContextValue["mode"] = isWatchRoute
@@ -62,15 +60,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       ? "mini"
       : "hidden";
   const value = useMemo<PlayerContextValue>(
-    () => ({ videoRef, state, play, close, setSubtitle, setAudio, session: state.session, mode }),
-    [videoRef, state, play, close, setSubtitle, setAudio, mode],
+    () => ({ videoRef, state, play, close, setAudio, session: state.session, mode }),
+    [videoRef, state, play, close, setAudio, mode],
   );
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [dragFraction, setDragFraction] = useState<number | null>(null);
   const [volume, setVolume] = useState(1);
-  const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controlsHoveredRef = useRef(false);
@@ -125,14 +122,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setVolume(level);
     if (video) video.volume = level;
   }, []);
-
-  const onPickSubtitle = useCallback(
-    (index: number | null) => {
-      setSubtitleMenuOpen(false);
-      setSubtitle(index);
-    },
-    [setSubtitle],
-  );
 
   const onPickAudio = useCallback(
     (index: number) => {
@@ -248,9 +237,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         >
           {/* Media layer — independent of the overlay layers. It owns the
               clip (overflow-hidden) and the video's black background, so the
-              video's letterbox edge can never bleed into the overlays. The
-              subtitle canvas lives here too, sharing the video's offset
-              parent and clip. */}
+              video's letterbox edge can never bleed into the overlays. */}
           <div
             className={
               mode === "big"
@@ -263,10 +250,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               autoPlay
               crossOrigin="anonymous"
               className="h-full w-full object-contain"
-            />
-            <canvas
-              ref={subtitleCanvasRef}
-              className="pointer-events-none absolute"
             />
           </div>
 
@@ -454,40 +437,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                     )}
                   </div>
 
-                  <div className="relative">
-                    <button
-                      onClick={() => setSubtitleMenuOpen((o) => !o)}
-                      aria-label="Subtitles"
-                      className={`rounded-lg p-2 transition-colors hover:bg-surface-hover ${
-                        subtitleMenuOpen ? "text-accent" : "text-text-secondary hover:text-text-primary"
-                      }`}
-                    >
-                      <Captions className="h-5 w-5" aria-hidden />
-                    </button>
-                    {subtitleMenuOpen && (
-                      <div className="absolute bottom-12 right-0 max-h-64 w-56 overflow-y-auto rounded-xl border border-border-strong bg-surface p-1">
-                        <button
-                          onClick={() => onPickSubtitle(null)}
-                          className={`w-full rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
-                            state.activeSubtitleIndex == null ? "text-accent" : "text-text-secondary"
-                          }`}
-                        >
-                          Off
-                        </button>
-                        {state.session?.subtitleTracks.map((track) => (
-                          <button
-                            key={track.index}
-                            onClick={() => onPickSubtitle(track.index)}
-                            className={`w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
-                              state.activeSubtitleIndex === track.index ? "text-accent" : "text-text-secondary"
-                            }`}
-                          >
-                            {track.displayTitle ?? track.language ?? `Track ${track.index}`}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
 
                   <button
                     onClick={() => router.push("/")}

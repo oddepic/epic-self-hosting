@@ -14,21 +14,10 @@ import {
   ticksFromSeconds,
 } from "@/lib/player/save-policy";
 import { reanchorTarget } from "@/lib/player/reanchor";
-import { subtitleDriftOffsetSeconds } from "@/lib/player/subtitle-drift";
 
 const RECOVER_COOLDOWN_MS = 4000;
 const STALL_TIMEOUT_MS = 10_000;
 const MANIFEST_TIMEOUT_MS = 15_000;
-
-export interface SubtitleTrackInfo {
-  index: number;
-  language: string | null;
-  isForced: boolean;
-  codec: string | null;
-  displayTitle: string | null;
-  isText: boolean;
-  url: string | null;
-}
 
 export interface AudioTrackInfo {
   index: number;
@@ -49,11 +38,8 @@ export interface PlaybackStart {
   seasonNumber: number;
   episodeNumber: number;
   animeTitle: string | null;
-  subtitleTracks: SubtitleTrackInfo[];
   audioTracks: AudioTrackInfo[];
-  fontUrls: string[];
   selectedAudioIndex: number | null;
-  selectedSubtitleIndex: number | null;
 }
 
 export interface PlayerState {
@@ -62,7 +48,6 @@ export interface PlayerState {
   session: PlaybackStart | null;
   positionSeconds: number;
   durationSeconds: number | null;
-  activeSubtitleIndex: number | null;
   activeAudioIndex: number | null;
   buffering: boolean;
 }
@@ -70,17 +55,15 @@ export interface PlayerState {
 export interface PlayerEngineOptions {
   onAutoAdvance: (episodeId: number) => void;
   videoRef: RefObject<HTMLVideoElement | null>;
-  subtitleCanvasRef: RefObject<HTMLCanvasElement | null>;
 }
 
-export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: PlayerEngineOptions) {
+export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions) {
   const [state, setState] = useState<PlayerState>({
     status: "idle",
     error: null,
     session: null,
     positionSeconds: 0,
     durationSeconds: null,
-    activeSubtitleIndex: null,
     activeAudioIndex: null,
     buffering: false,
   });
@@ -89,7 +72,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
   const lastPositionRef = useRef(0);
   const lastSaveAtRef = useRef(0);
   const hlsRef = useRef<import("hls.js").default | null>(null);
-  const jassubRef = useRef<import("jassub").default | null>(null);
   const startPositionRef = useRef(0);
   const loadGenerationRef = useRef(0);
   const autoAdvanceRef = useRef(onAutoAdvance);
@@ -164,12 +146,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
       const position = video.currentTime;
       lastPositionRef.current = position;
       setState((s) => ({ ...s, positionSeconds: position, durationSeconds: video.duration }));
-      // Jellyfin's HLS transcode drifts the audio content progressively early
-      // vs its PTS; compensate the JASSUB clock so subtitles track the audio.
-      // Applied continuously so the offset keeps pace as playback advances.
-      if (jassubRef.current) {
-        jassubRef.current.timeOffset = subtitleDriftOffsetSeconds(position);
-      }
       if (shouldSaveNow(lastSaveAtRef.current, Date.now())) {
         reportProgress(position, video.paused);
       }
@@ -261,8 +237,8 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
     };
     const onLoadedMetadata = () => {
       // hls.js already seeks to `startPosition` itself; a second manual seek
-      // here can land on a different segment and desync the subtitle clock.
-      // Only native playback needs the manual seek.
+      // here can land on a different segment. Only native playback needs
+      // the manual seek.
       if (hlsPositionManagedRef.current) return;
       const start = startPositionRef.current;
       if (start > 0 && video.currentTime < 1) {
@@ -333,8 +309,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
     }
     hlsRef.current?.destroy();
     hlsRef.current = null;
-    jassubRef.current?.destroy();
-    jassubRef.current = null;
     const video = videoRef.current;
     if (video) {
       video.pause();
@@ -342,56 +316,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
       video.load();
     }
   }, [videoRef]);
-
-  const attachSubtitles = useCallback(async (track: SubtitleTrackInfo | null, fonts: string[]) => {
-    jassubRef.current?.destroy();
-    jassubRef.current = null;
-
-    const video = videoRef.current;
-    if (!video || !track?.url) return;
-
-    const generation = loadGenerationRef.current;
-    try {
-        const { default: JASSUB } = await import("jassub");
-        const [subResponse, ...fontResponses] = await Promise.all([
-          fetch(track.url),
-          ...fonts.map((url) => fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null))),
-        ]);
-        if (generation !== loadGenerationRef.current) return;
-        if (!subResponse.ok) return;
-
-        const subContent = await subResponse.text();
-        const fontBuffers = fontResponses.filter((b): b is ArrayBuffer => b != null).map((b) => new Uint8Array(b));
-
-        jassubRef.current = new JASSUB({
-          video,
-          subContent,
-          fonts: fontBuffers,
-          canvas: subtitleCanvasRef.current ?? undefined,
-          // Compensate Jellyfin's copied-AAC drift from the very first frame so
-          // the compensation can never be missed by a teardown/attach race.
-          timeOffset: subtitleDriftOffsetSeconds(video.currentTime),
-        });
-        await jassubRef.current.ready;
-      } catch {
-        jassubRef.current = null;
-      }
-    }, [subtitleCanvasRef, videoRef]);
-
-    const setSubtitle = useCallback(
-      (index: number | null) => {
-        const session = sessionRef.current;
-        if (!session) return;
-        const track = index == null ? null : session.subtitleTracks.find((t) => t.index === index) ?? null;
-        setState((s) => ({ ...s, activeSubtitleIndex: track?.isText ? track.index : null }));
-        if (!track || !track.isText) {
-          void attachSubtitles(null, []);
-          return;
-        }
-        void attachSubtitles(track, session.fontUrls);
-      },
-      [attachSubtitles],
-    );
 
     const setAudio = useCallback(
       async (index: number) => {
@@ -407,7 +331,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
             episodeId: session.episodeId,
             resume: false,
             audioStreamIndex: index,
-            subtitleStreamIndex: state.activeSubtitleIndex ?? session.selectedSubtitleIndex ?? null,
           }),
         });
         if (!res.ok) return;
@@ -479,7 +402,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
           video.play().catch(() => {});
         }
       },
-      [reportStopped, recoverMediaError, recoverStream, state.activeSubtitleIndex, videoRef],
+    [reportStopped, recoverMediaError, recoverStream, videoRef],
     );
     const play = useCallback(async (episodeId: number, resume = true) => {
       const video = videoRef.current;
@@ -487,8 +410,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
 
       // StrictMode (dev) mounts the watch page twice, firing two play() calls
       // for the same episode back-to-back. Without this guard the second call
-      // tears down what the first just built - including the JASSUB instance
-      // that the drift compensation updates on every timeupdate.
+      // tears down the stream the first just built.
       if (playInFlightRef.current === episodeId) return;
       playInFlightRef.current = episodeId;
       try {
@@ -512,7 +434,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
         session: null,
         positionSeconds: 0,
         durationSeconds: null,
-        activeSubtitleIndex: null,
         activeAudioIndex: null,
         buffering: true,
       });
@@ -539,17 +460,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
         startPositionRef.current = secondsFromTicks(start.startPositionTicks);
         lastPositionRef.current = startPositionRef.current;
         lastSaveAtRef.current = Date.now();
-        const selectedSub = start.subtitleTracks.find((t) => t.index === start.selectedSubtitleIndex) ?? null;
-        setState((s) => ({
-          ...s,
-          session: start,
-          activeSubtitleIndex: selectedSub?.isText ? selectedSub.index : null,
-          activeAudioIndex: start.selectedAudioIndex,
-        }));
 
-        if (selectedSub?.isText) {
-          void attachSubtitles(selectedSub, start.fontUrls);
-        }
 
         report("/Sessions/Playing", buildStartPayload(start));
 
@@ -636,7 +547,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
         playInFlightRef.current = null;
       }
     }
-  }, [attachSubtitles, recoverMediaError, recoverStream, report, reportStopped, teardown, videoRef]);
+  }, [recoverMediaError, recoverStream, report, reportStopped, teardown, videoRef]);
 
   playRef.current = play;
 
@@ -645,7 +556,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
     playInFlightRef.current = null;
     teardown();
     sessionRef.current = null;
-    setState({ status: "idle", error: null, session: null, positionSeconds: 0, durationSeconds: null, activeSubtitleIndex: null, activeAudioIndex: null, buffering: false });
+    setState({ status: "idle", error: null, session: null, positionSeconds: 0, durationSeconds: null, activeAudioIndex: null, buffering: false });
   }, [reportStopped, teardown]);
 
   useEffect(() => {
@@ -654,5 +565,5 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
     return attachVideo(video);
   }, [attachVideo, videoRef]);
 
-  return { videoRef, state, play, close, setSubtitle, setAudio };
+  return { videoRef, state, play, close, setAudio };
 }

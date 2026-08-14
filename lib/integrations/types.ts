@@ -171,7 +171,7 @@ export interface JellyfinClient {
   getMediaStreams(itemId: string, accessToken: string): Promise<JellyfinMediaStream[]>;
   getMediaSource(itemId: string, accessToken: string): Promise<JellyfinMediaSource>;
   authenticateUserByName(username: string, password: string): Promise<JellyfinAuth>;
-  getPlaybackInfo(itemId: string, userId: string, accessToken: string, startPositionTicks: number, audioStreamIndex?: number, subtitleStreamIndex?: number, burnInSubtitles?: boolean): Promise<JellyfinPlaybackInfo>;
+  getPlaybackInfo(itemId: string, userId: string, accessToken: string, startPositionTicks: number, audioStreamIndex?: number): Promise<JellyfinPlaybackInfo>;
   requestPlayback(sessionId: string, itemId: string, startPositionTicks?: number): Promise<void>;
   listAllItemIds(): Promise<string[]>;
   deleteItem(id: string): Promise<void>;

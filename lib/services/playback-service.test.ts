@@ -42,13 +42,13 @@ function seedWatchableEpisode(
 
 function fakeJellyfin(): JellyfinClient & {
   authCalls: { username: string; password: string }[];
-  playbackInfoCalls: { itemId: string; userId: string; startPositionTicks: number; audioStreamIndex?: number; subtitleStreamIndex?: number; burnInSubtitles?: boolean }[];
+  playbackInfoCalls: { itemId: string; userId: string; startPositionTicks: number; audioStreamIndex?: number }[];
   streams: JellyfinMediaStream[];
   attachments: { index: number; codec: string | null; fileName: string | null; mimeType: string | null }[];
   mediaSourceId: string;
 } {
   const authCalls: { username: string; password: string }[] = [];
-  const playbackInfoCalls: { itemId: string; userId: string; startPositionTicks: number; audioStreamIndex?: number; subtitleStreamIndex?: number; burnInSubtitles?: boolean }[] = [];
+  const playbackInfoCalls: { itemId: string; userId: string; startPositionTicks: number; audioStreamIndex?: number }[] = [];
   return {
     authCalls,
     playbackInfoCalls,
@@ -78,8 +78,8 @@ function fakeJellyfin(): JellyfinClient & {
       authCalls.push({ username, password });
       return { accessToken: "user-token", userId: "service-user-id" };
     },
-    async getPlaybackInfo(itemId: string, userId: string, accessToken: string, startPositionTicks: number, audioStreamIndex?: number, subtitleStreamIndex?: number, burnInSubtitles?: boolean): Promise<JellyfinPlaybackInfo> {
-      playbackInfoCalls.push({ itemId, userId, startPositionTicks, audioStreamIndex, subtitleStreamIndex, burnInSubtitles });
+    async getPlaybackInfo(itemId: string, userId: string, accessToken: string, startPositionTicks: number, audioStreamIndex?: number): Promise<JellyfinPlaybackInfo> {
+      playbackInfoCalls.push({ itemId, userId, startPositionTicks, audioStreamIndex });
       return {
         url: "http://localhost:8096/Videos/jf-ep-1/stream.m3u8?ApiKey=" + accessToken,
         playMethod: "Transcode",
@@ -123,8 +123,6 @@ describe("PlaybackService.startPlayback", () => {
         userId: "service-user-id",
         startPositionTicks: 0,
         audioStreamIndex: undefined,
-        subtitleStreamIndex: undefined,
-        burnInSubtitles: false,
       },
     ]);
     expect(result).toMatchObject({
@@ -204,8 +202,6 @@ describe("PlaybackService.startPlayback", () => {
     await service.startPlayback(episodeId, { resume: true, userId });
 
     expect(jellyfin.playbackInfoCalls[0]!.audioStreamIndex).toBe(1);
-    expect(jellyfin.playbackInfoCalls[0]!.subtitleStreamIndex).toBeUndefined();
-    expect(jellyfin.playbackInfoCalls[0]!.burnInSubtitles).toBe(false);
   });
 
   it("applies the default jpn audio preference when nothing is saved", async () => {
@@ -224,34 +220,6 @@ describe("PlaybackService.startPlayback", () => {
     await service.startPlayback(episodeId);
 
     expect(jellyfin.playbackInfoCalls[0]!.audioStreamIndex).toBe(1);
-  });
-
-  it("exposes text subtitle tracks with client-fetchable URLs", async () => {
-    const { episodeId } = seedWatchableEpisode(db);
-    const jellyfin = fakeJellyfin();
-    jellyfin.streams = [
-      { index: 1, type: "Audio", codec: "aac", language: "jpn", isForced: false, isDefault: true, displayTitle: null },
-      { index: 2, type: "Subtitle", codec: "ass", language: "spa", isForced: false, isDefault: true, displayTitle: "Spanish ASS" },
-      { index: 3, type: "Subtitle", codec: "pgs", language: "eng", isForced: false, isDefault: false, displayTitle: "English PGS" },
-    ];
-    service = new PlaybackService(db, jellyfin, {
-      jellyfinUrl: "http://localhost:8096",
-      serviceUsername: "epic",
-      servicePassword: "secret",
-    });
-
-    const result = await service.startPlayback(episodeId);
-
-    const spa = result.subtitleTracks.find((t) => t.index === 2);
-    const eng = result.subtitleTracks.find((t) => t.index === 3);
-    expect(spa).toMatchObject({
-      index: 2,
-      isText: true,
-      language: "spa",
-      displayTitle: "Spanish ASS",
-    });
-    expect(spa!.url).toContain("/Videos/jf-ep-1/ms-1/Subtitles/2/0/Stream.ass?ApiKey=");
-    expect(eng).toMatchObject({ index: 3, isText: false, url: null });
   });
 
   it("exposes audio tracks with language, codec and display title", async () => {
@@ -277,12 +245,11 @@ describe("PlaybackService.startPlayback", () => {
     expect(result.selectedAudioIndex).toBe(1);
   });
 
-  it("does not burn in text subtitles and skips the subtitle index", async () => {
+  it("honours an explicit audio index override", async () => {
     const { episodeId } = seedWatchableEpisode(db);
     const jellyfin = fakeJellyfin();
     jellyfin.streams = [
       { index: 1, type: "Audio", codec: "aac", language: "jpn", isForced: false, isDefault: true, displayTitle: null },
-      { index: 2, type: "Subtitle", codec: "ass", language: "spa", isForced: false, isDefault: true, displayTitle: null },
     ];
     service = new PlaybackService(db, jellyfin, {
       jellyfinUrl: "http://localhost:8096",
@@ -290,75 +257,9 @@ describe("PlaybackService.startPlayback", () => {
       servicePassword: "secret",
     });
 
-    const result = await service.startPlayback(episodeId, { resume: false, subtitleStreamIndex: 2 });
-
-    expect(jellyfin.playbackInfoCalls[0]!.burnInSubtitles).toBe(false);
-    expect(jellyfin.playbackInfoCalls[0]!.subtitleStreamIndex).toBeUndefined();
-    expect(result.selectedSubtitleIndex).toBe(2);
-  });
-
-  it("burns in image subtitles and passes the subtitle index", async () => {
-    const { episodeId } = seedWatchableEpisode(db);
-    const jellyfin = fakeJellyfin();
-    jellyfin.streams = [
-      { index: 1, type: "Audio", codec: "aac", language: "jpn", isForced: false, isDefault: true, displayTitle: null },
-      { index: 2, type: "Subtitle", codec: "pgs", language: "eng", isForced: false, isDefault: true, displayTitle: null },
-    ];
-    service = new PlaybackService(db, jellyfin, {
-      jellyfinUrl: "http://localhost:8096",
-      serviceUsername: "epic",
-      servicePassword: "secret",
-    });
-
-    await service.startPlayback(episodeId, { resume: false, subtitleStreamIndex: 2 });
-
-    expect(jellyfin.playbackInfoCalls[0]!.burnInSubtitles).toBe(true);
-    expect(jellyfin.playbackInfoCalls[0]!.subtitleStreamIndex).toBe(2);
-  });
-
-  it("honours explicit audio and subtitle index overrides", async () => {
-    const { episodeId } = seedWatchableEpisode(db);
-    const jellyfin = fakeJellyfin();
-    jellyfin.streams = [
-      { index: 1, type: "Audio", codec: "aac", language: "jpn", isForced: false, isDefault: true, displayTitle: null },
-      { index: 2, type: "Subtitle", codec: "ass", language: "eng", isForced: false, isDefault: true, displayTitle: null },
-    ];
-    service = new PlaybackService(db, jellyfin, {
-      jellyfinUrl: "http://localhost:8096",
-      serviceUsername: "epic",
-      servicePassword: "secret",
-    });
-
-    await service.startPlayback(episodeId, { resume: false, audioStreamIndex: 1, subtitleStreamIndex: 2 });
+    await service.startPlayback(episodeId, { resume: false, audioStreamIndex: 1 });
 
     expect(jellyfin.playbackInfoCalls[0]!.audioStreamIndex).toBe(1);
-    expect(jellyfin.playbackInfoCalls[0]!.subtitleStreamIndex).toBeUndefined();
-  });
-
-  it("returns embedded font attachment URLs for text-subtitle tracks", async () => {
-    const { episodeId } = seedWatchableEpisode(db);
-    const jellyfin = fakeJellyfin();
-    jellyfin.streams = [
-      { index: 1, type: "Audio", codec: "aac", language: "jpn", isForced: false, isDefault: true, displayTitle: null },
-      { index: 2, type: "Subtitle", codec: "ass", language: "spa", isForced: false, isDefault: true, displayTitle: null },
-    ];
-    jellyfin.attachments = [
-      { index: 17, codec: "ttf", fileName: "arial.ttf", mimeType: "application/x-truetype-font" },
-      { index: 18, codec: "otf", fileName: "adobe.otf", mimeType: "application/x-truetype-font" },
-      { index: 19, codec: "notfont", fileName: "x.png", mimeType: "image/png" },
-    ];
-    service = new PlaybackService(db, jellyfin, {
-      jellyfinUrl: "http://localhost:8096",
-      serviceUsername: "epic",
-      servicePassword: "secret",
-    });
-
-    const result = await service.startPlayback(episodeId);
-
-    expect(result.fontUrls).toEqual([
-      "http://localhost:8096/Videos/jf-ep-1/ms-1/Attachments/17?ApiKey=user-token",
-      "http://localhost:8096/Videos/jf-ep-1/ms-1/Attachments/18?ApiKey=user-token",
-    ]);
   });
 });
 

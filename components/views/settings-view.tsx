@@ -40,8 +40,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
   const [settingUpSonarr, setSettingUpSonarr] = useState(false);
   const [sonarrSetupResult, setSonarrSetupResult] = useState<string | null>(null);
   const [prefAudio, setPrefAudio] = useState("");
-  const [prefSubtitle, setPrefSubtitle] = useState("");
-  const [prefForced, setPrefForced] = useState(false);
   const [prefSaved, setPrefSaved] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetResult, setResetResult] = useState<string | null>(null);
@@ -193,8 +191,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         audioLanguage: prefAudio || null,
-        subtitleLanguage: prefSubtitle || null,
-        subtitleForced: prefForced,
       }),
     });
     if (res.ok) setPrefSaved(true);
@@ -208,8 +204,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
         preference: { audioLanguage: string | null; subtitleLanguage: string | null; subtitleForced: boolean } | null;
       };
       setPrefAudio(body.preference?.audioLanguage ?? "");
-      setPrefSubtitle(body.preference?.subtitleLanguage ?? "");
-      setPrefForced(body.preference?.subtitleForced ?? false);
     }
   }
 
@@ -246,23 +240,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
             onChange={(e) => setPrefAudio(e.target.value)}
             placeholder="jpn"
             className="w-28"
-          />
-        </SettingRow>
-        <SettingRow label="Subtitle language" description="ISO-639 code applied at playback.">
-          <Input
-            type="text"
-            value={prefSubtitle}
-            onChange={(e) => setPrefSubtitle(e.target.value)}
-            placeholder="spa"
-            className="w-28"
-          />
-        </SettingRow>
-        <SettingRow label="Forced subtitles only">
-          <input
-            type="checkbox"
-            checked={prefForced}
-            onChange={(e) => setPrefForced(e.target.checked)}
-            className="h-4 w-4 accent-accent"
           />
         </SettingRow>
         <SettingRow label="Track preferences">
