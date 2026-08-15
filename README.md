@@ -31,7 +31,7 @@ Self-hosted anime platform: search with AniList, acquire through Sonarr, and wat
 ## Prerequisites
 
 - Node.js 20+ and npm
-- A Jellyfin server (e.g. `http://localhost:8096`) with a library pointed at your media
+- A Jellyfin server (e.g. `http://localhost:8096`) with a library pointed at your media, using the `tools/ffmpeg-shim/` wrapper to keep subtitles in sync
 - Sonarr (optional, for acquisition) with its API key
 - qBittorrent (optional, for the download queue)
 
@@ -89,7 +89,7 @@ await player.play(episodeId, false);
 - Foundation, auth, search, and acquisition — done
 - Jellyfin availability, webhooks, and live SSE updates — done
 - Persistent player, client-side ASS subtitles, control bar — done
-- Track picker UI — in progress
+- Audio and subtitle track pickers — done
 - Skip Intro / Credits (Intro Skipper segments)
 - Multi-user support beyond the single local account
 - Download queue (qBittorrent) UI
