@@ -53,11 +53,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const SKIP_COALESCE_MS = 300;
 
+  const [skipSeconds, setSkipSeconds] = useState(5);
+  const [autoplayNext, setAutoplayNext] = useState(true);
+
+  useEffect(() => {
+    void fetch("/api/settings/playback")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => {
+        if (!b) return;
+        setSkipSeconds(typeof b.skipSeconds === "number" ? b.skipSeconds : 5);
+        setAutoplayNext(typeof b.autoplayNext === "boolean" ? b.autoplayNext : true);
+      })
+      .catch(() => {});
+  }, [pathname]);
+
   const onAutoAdvance = useMemo(
     () => (episodeId: number) => {
+      if (!autoplayNext) return;
       router.replace(`/watch/${episodeId}`);
     },
-    [router],
+    [router, autoplayNext],
   );
 
   const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef });
@@ -230,10 +245,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        skip(-5);
+        skip(-skipSeconds);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        skip(5);
+        skip(skipSeconds);
       } else if (e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
         togglePlay();
@@ -241,7 +256,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, skip, togglePlay]);
+  }, [mode, skip, togglePlay, skipSeconds]);
 
   return (
     <PlayerContext.Provider value={value}>
@@ -378,12 +393,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
               <div className="mt-1 flex items-center gap-1">
                 <button
-                  onClick={() => skip(-5)}
-                  aria-label="Back 5 seconds"
+                  onClick={() => skip(-skipSeconds)}
+                  aria-label={`Back ${skipSeconds} seconds`}
                   className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                 >
                   <RotateCcw className="h-5 w-5" aria-hidden />
-                  <span className="sr-only">Back 5 seconds</span>
+                  <span className="sr-only">Back {skipSeconds} seconds</span>
                 </button>
                 <button
                   onClick={togglePlay}
@@ -397,12 +412,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                   )}
                 </button>
                 <button
-                  onClick={() => skip(5)}
-                  aria-label="Forward 5 seconds"
+                  onClick={() => skip(skipSeconds)}
+                  aria-label={`Forward ${skipSeconds} seconds`}
                   className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                 >
                   <RotateCw className="h-5 w-5" aria-hidden />
-                  <span className="sr-only">Forward 5 seconds</span>
+                  <span className="sr-only">Forward {skipSeconds} seconds</span>
                 </button>
 
                 <span className="ml-2 font-mono text-xs text-text-secondary">
