@@ -76,10 +76,9 @@ export interface PlayerState {
 export interface PlayerEngineOptions {
   onAutoAdvance: (episodeId: number) => void;
   videoRef: RefObject<HTMLVideoElement | null>;
-  subtitleCanvasRef: RefObject<HTMLCanvasElement | null>;
 }
 
-export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: PlayerEngineOptions) {
+export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions) {
   const [state, setState] = useState<PlayerState>({
     status: "idle",
     error: null,
@@ -454,14 +453,13 @@ export function usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef }: 
             video,
             subContent,
             fonts: fontBuffers,
-            canvas: subtitleCanvasRef.current ?? undefined,
           });
           await jassubRef.current.ready;
         } catch {
           jassubRef.current = null;
         }
       },
-      [subtitleCanvasRef, videoRef],
+      [videoRef],
     );
 
     const setSubtitle = useCallback(
