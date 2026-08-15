@@ -22,10 +22,6 @@ function makeAudio(overrides: Partial<JellyfinMediaStream> = {}): JellyfinMediaS
   return makeStream({ type: "Audio", ...overrides });
 }
 
-function makeSub(overrides: Partial<JellyfinMediaStream> = {}): JellyfinMediaStream {
-  return makeStream({ type: "Subtitle", codec: "subrip", ...overrides });
-}
-
 describe("TrackPreferenceService.matchStreams", () => {
   let db: Db;
   let service: TrackPreferenceService;
@@ -45,7 +41,7 @@ describe("TrackPreferenceService.matchStreams", () => {
       subtitleLanguage: null,
       subtitleForced: false,
     });
-    expect(result).toEqual({ audioStreamIndex: 1, subtitleStreamIndex: undefined });
+    expect(result).toEqual({ audioStreamIndex: 1, subtitleStreamIndex: undefined, burnInSubtitleStreamIndex: undefined });
   });
 
   it("matches audio by a 2-letter language code", () => {
@@ -74,54 +70,16 @@ describe("TrackPreferenceService.matchStreams", () => {
     expect(result.audioStreamIndex).toBe(1);
   });
 
-  it("matches subtitle tracks carrying a BCP-47 language tag", () => {
-    const streams = [
-      makeSub({ index: 2, language: "es-ES", isForced: false }),
-    ];
-    const result = service.matchStreams(streams, {
-      audioLanguage: "jpn",
-      subtitleLanguage: "spa",
-      subtitleForced: false,
-    });
-    expect(result.subtitleStreamIndex).toBe(2);
-  });
-
-  it("matches subtitle by language and forced flag", () => {
-    const streams = [
-      makeSub({ index: 2, language: "eng", isForced: false }),
-      makeSub({ index: 3, language: "spa", isForced: true }),
-    ];
-    const result = service.matchStreams(streams, {
-      audioLanguage: "jpn",
-      subtitleLanguage: "spa",
-      subtitleForced: true,
-    });
-    expect(result.subtitleStreamIndex).toBe(3);
-  });
-
-  it("falls back to a language-only subtitle match when no forced track exists", () => {
-    const streams = [
-      makeSub({ index: 2, language: "spa", isForced: false }),
-    ];
-    const result = service.matchStreams(streams, {
-      audioLanguage: "jpn",
-      subtitleLanguage: "spa",
-      subtitleForced: true,
-    });
-    expect(result.subtitleStreamIndex).toBe(2);
-  });
-
   it("returns undefined indexes when the preferred language is absent", () => {
     const streams = [
       makeAudio({ index: 0, language: "eng" }),
-      makeSub({ index: 1, language: "eng" }),
     ];
     const result = service.matchStreams(streams, {
       audioLanguage: "fra",
       subtitleLanguage: "spa",
       subtitleForced: false,
     });
-    expect(result).toEqual({ audioStreamIndex: undefined, subtitleStreamIndex: undefined });
+    expect(result).toEqual({ audioStreamIndex: undefined, subtitleStreamIndex: undefined, burnInSubtitleStreamIndex: undefined });
   });
 
   it("prefers the default track among multiple language matches", () => {
@@ -135,6 +93,116 @@ describe("TrackPreferenceService.matchStreams", () => {
       subtitleForced: false,
     });
     expect(result.audioStreamIndex).toBe(1);
+  });
+});
+
+function makeSubtitle(overrides: Partial<JellyfinMediaStream> = {}): JellyfinMediaStream {
+  return makeStream({ type: "Subtitle", codec: "ass", language: "eng", ...overrides });
+}
+
+describe("TrackPreferenceService.matchStreams subtitles", () => {
+  let db: Db;
+  let service: TrackPreferenceService;
+
+  beforeEach(() => {
+    db = createDb(":memory:");
+    service = new TrackPreferenceService(db);
+  });
+
+  it("matches a subtitle by language and forced flag", () => {
+    const streams = [
+      makeSubtitle({ index: 2, language: "eng", isForced: false, isDefault: true }),
+      makeSubtitle({ index: 3, language: "eng", isForced: true }),
+      makeSubtitle({ index: 4, language: "spa", isForced: false }),
+    ];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "eng",
+      subtitleForced: false,
+    });
+    expect(result.subtitleStreamIndex).toBe(2);
+  });
+
+  it("matches a forced subtitle when forced is requested", () => {
+    const streams = [
+      makeSubtitle({ index: 2, language: "eng", isForced: false }),
+      makeSubtitle({ index: 3, language: "eng", isForced: true }),
+    ];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "eng",
+      subtitleForced: true,
+    });
+    expect(result.subtitleStreamIndex).toBe(3);
+  });
+
+  it("falls back to the first non-forced text track when the preferred language is absent", () => {
+    const streams = [
+      makeSubtitle({ index: 2, language: "spa", isForced: true }),
+      makeSubtitle({ index: 3, language: "fra", isForced: false }),
+    ];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "eng",
+      subtitleForced: false,
+    });
+    expect(result.subtitleStreamIndex).toBe(3);
+  });
+
+  it("does not select a signs-only track when the preferred language is only forced", () => {
+    const streams = [
+      makeSubtitle({ index: 2, language: "eng", isForced: true }),
+      makeSubtitle({ index: 3, language: "spa", isForced: false }),
+    ];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "eng",
+      subtitleForced: false,
+    });
+    expect(result.subtitleStreamIndex).toBe(3);
+  });
+
+  it("returns no subtitle when the preference is off", () => {
+    const streams = [makeSubtitle({ index: 2, language: "eng", isForced: false })];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "off",
+      subtitleForced: false,
+    });
+    expect(result.subtitleStreamIndex).toBeUndefined();
+  });
+
+  it("ignores image subtitle tracks", () => {
+    const streams = [makeSubtitle({ index: 2, language: "eng", codec: "pgs", isForced: false })];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "eng",
+      subtitleForced: false,
+    });
+    expect(result.subtitleStreamIndex).toBeUndefined();
+  });
+
+  it("matches an image subtitle by language and forced flag for burn-in", () => {
+    const streams = [
+      makeSubtitle({ index: 3, language: "eng", codec: "pgs", isForced: false, isDefault: true }),
+      makeSubtitle({ index: 4, language: "spa", codec: "pgs", isForced: false }),
+    ];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "eng",
+      subtitleForced: false,
+    });
+    expect(result.burnInSubtitleStreamIndex).toBe(3);
+  });
+
+  it("returns no burn-in index when the preference is off", () => {
+    const streams = [makeSubtitle({ index: 3, language: "eng", codec: "pgs", isForced: false })];
+    const result = service.matchStreams(streams, {
+      audioLanguage: "jpn",
+      subtitleLanguage: "off",
+      subtitleForced: false,
+    });
+    expect(result.burnInSubtitleStreamIndex).toBeUndefined();
   });
 });
 
@@ -190,7 +258,7 @@ describe("TrackPreferenceService.getPreferenceForEpisode", () => {
   it("returns the default jpn preference when nothing is saved", () => {
     expect(service.getPreferenceForEpisode(userId)).toEqual({
       audioLanguage: "jpn",
-      subtitleLanguage: null,
+      subtitleLanguage: "eng",
       subtitleForced: false,
     });
   });
@@ -198,7 +266,7 @@ describe("TrackPreferenceService.getPreferenceForEpisode", () => {
   it("returns the default for an unknown user id", () => {
     expect(service.getPreferenceForEpisode(999_999)).toEqual({
       audioLanguage: "jpn",
-      subtitleLanguage: null,
+      subtitleLanguage: "eng",
       subtitleForced: false,
     });
   });
@@ -210,5 +278,41 @@ describe("TrackPreferenceService.getPreferenceForEpisode", () => {
       subtitleLanguage: "spa",
       subtitleForced: true,
     });
+  });
+});
+
+describe("TrackPreferenceService save + match round-trip", () => {
+  let db: Db;
+  let service: TrackPreferenceService;
+  let userId: number;
+
+  beforeEach(() => {
+    db = createDb(":memory:");
+    service = new TrackPreferenceService(db);
+    userId = db
+      .insert(users)
+      .values({ username: "admin", passwordHash: hashPassword("x"), preferences: {}, createdAt: 1 })
+      .returning()
+      .get().id;
+  });
+
+  it("re-matches a saved subtitle signature on a different episode's streams", () => {
+    service.savePreference(userId, { audioLanguage: "jpn", subtitleLanguage: "spa", subtitleForced: false });
+    const otherEpisodeStreams = [
+      makeAudio({ index: 0, language: "jpn" }),
+      makeSubtitle({ index: 7, language: "spa", isForced: false }),
+      makeSubtitle({ index: 8, language: "eng", isForced: false }),
+    ];
+    const pref = service.getPreferenceForEpisode(userId);
+    const match = service.matchStreams(otherEpisodeStreams, pref);
+    expect(match.subtitleStreamIndex).toBe(7);
+    expect(match.audioStreamIndex).toBe(0);
+  });
+
+  it("keeps subtitles off after persisting the off sentinel", () => {
+    service.savePreference(userId, { audioLanguage: "jpn", subtitleLanguage: "off", subtitleForced: false });
+    const pref = service.getPreferenceForEpisode(userId);
+    const match = service.matchStreams([makeSubtitle({ index: 7, language: "eng", isForced: false })], pref);
+    expect(match.subtitleStreamIndex).toBeUndefined();
   });
 });

@@ -44,7 +44,7 @@ function isUnauthorized(error: unknown): boolean {
   );
 }
 
-const WEB_DEVICE_PROFILE = {
+export const WEB_DEVICE_PROFILE = {
   MaxStreamingBitrate: 120_000_000,
   DirectPlayProfiles: [
     { Container: "mp4", VideoCodec: "h264", AudioCodec: "aac", Type: DlnaProfileType.Video },
@@ -52,7 +52,7 @@ const WEB_DEVICE_PROFILE = {
   ],
   TranscodingProfiles: [
     {
-      Container: "m3u8",
+      Container: "ts",
       Type: DlnaProfileType.Video,
       AudioCodec: "aac",
       VideoCodec: "h264",
@@ -130,12 +130,11 @@ export class JellyfinSdkClient implements JellyfinClient {
     startPositionTicks: number,
     audioStreamIndex?: number,
     subtitleStreamIndex?: number,
-    burnInSubtitles = true,
   ): Promise<JellyfinPlaybackInfo> {
     return this.withFreshAuth(accessToken, async (token) => {
       const api = new Jellyfin({
-        clientInfo: { name: "Epic Self-Hosted", version: "0.1.0" },
-        deviceInfo: { name: "browser", id: "epic-self-hosted-player" },
+        clientInfo: { name: "epic self-hosting", version: "0.1.0" },
+        deviceInfo: { name: "browser", id: "epic-self-hosting-player" },
       }).createApi(this.api.basePath, token);
 
       const { data } = await getMediaInfoApi(api).getPostedPlaybackInfo({
@@ -143,7 +142,6 @@ export class JellyfinSdkClient implements JellyfinClient {
         userId,
         startTimeTicks: startPositionTicks,
         audioStreamIndex,
-        subtitleStreamIndex,
         playbackInfoDto: {
           UserId: userId,
           StartTimeTicks: startPositionTicks,
@@ -151,7 +149,9 @@ export class JellyfinSdkClient implements JellyfinClient {
           EnableDirectPlay: true,
           EnableDirectStream: true,
           EnableTranscoding: true,
-          AlwaysBurnInSubtitleWhenTranscoding: burnInSubtitles,
+          ...(subtitleStreamIndex !== undefined
+            ? { SubtitleStreamIndex: subtitleStreamIndex, AlwaysBurnInSubtitleWhenTranscoding: true }
+            : {}),
         },
       });
 
@@ -183,7 +183,7 @@ export class JellyfinSdkClient implements JellyfinClient {
     const params = new URLSearchParams({
       Static: "true",
       mediaSourceId: mediaSourceId ?? itemId,
-      deviceId: "epic-self-hosted-player",
+      deviceId: "epic-self-hosting-player",
       ApiKey: token,
     });
     if (etag) params.set("Tag", etag);
@@ -193,8 +193,8 @@ export class JellyfinSdkClient implements JellyfinClient {
   async getMediaStreams(itemId: string, accessToken: string): Promise<JellyfinMediaStream[]> {
     return this.withFreshAuth(accessToken, async (token) => {
       const api = new Jellyfin({
-        clientInfo: { name: "Epic Self-Hosted", version: "0.1.0" },
-        deviceInfo: { name: "browser", id: "epic-self-hosted-player" },
+        clientInfo: { name: "epic self-hosting", version: "0.1.0" },
+        deviceInfo: { name: "browser", id: "epic-self-hosting-player" },
       }).createApi(this.api.basePath, token);
       const { data } = await getUserLibraryApi(api).getItem({ itemId });
       const source = data.MediaSources?.[0];
@@ -215,8 +215,8 @@ export class JellyfinSdkClient implements JellyfinClient {
   async getMediaSource(itemId: string, accessToken: string): Promise<JellyfinMediaSource> {
     return this.withFreshAuth(accessToken, async (token) => {
       const api = new Jellyfin({
-        clientInfo: { name: "Epic Self-Hosted", version: "0.1.0" },
-        deviceInfo: { name: "browser", id: "epic-self-hosted-player" },
+        clientInfo: { name: "epic self-hosting", version: "0.1.0" },
+        deviceInfo: { name: "browser", id: "epic-self-hosting-player" },
       }).createApi(this.api.basePath, token);
       const { data } = await getUserLibraryApi(api).getItem({ itemId });
       const source = data.MediaSources?.[0];

@@ -24,7 +24,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   return {
-    serverName: env.SERVER_NAME ?? "Epic Self-Hosted",
+    serverName: env.SERVER_NAME ?? "epic self-hosting",
     userName: env.USER_NAME ?? "admin",
     authPassword: env.AUTH_PASSWORD,
     databaseUrl: env.DATABASE_URL ?? "file:data.db",

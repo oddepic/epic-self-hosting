@@ -11,12 +11,12 @@ export async function POST() {
   const jellyfin = new JellyfinSdkClient(
     config.jellyfinUrl,
     config.jellyfinApiKey,
-    { name: "Epic Self-Hosted", version: "0.1.0" },
-    { name: "server", id: "epic-self-hosted-reset" },
+    { name: "epic self-hosting", version: "0.1.0" },
+    { name: "server", id: "epic-self-hosting-reset" },
   );
   const sonarr = new SonarrHttpClient(config.sonarrUrl, config.sonarrApiKey);
 
-  const service = new ResetService(db, jellyfin, sonarr);
+  const service = new ResetService(db, jellyfin, sonarr, config.sonarrRootFolder);
   try {
     const result = await service.reset();
     return NextResponse.json({ ok: true, ...result });

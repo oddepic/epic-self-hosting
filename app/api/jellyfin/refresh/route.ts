@@ -17,8 +17,8 @@ export async function POST(request: NextRequest) {
   const jellyfin = new JellyfinSdkClient(
     config.jellyfinUrl,
     config.jellyfinApiKey,
-    { name: "Epic Self-Hosted", version: "0.1.0" },
-    { name: "server", id: "epic-self-hosted-refresh" },
+    { name: "epic self-hosting", version: "0.1.0" },
+    { name: "server", id: "epic-self-hosting-refresh" },
   );
 
   try {

@@ -1,4 +1,6 @@
 import { sql } from "drizzle-orm";
+import { mkdir, readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 import type { Db } from "../db/client";
 import { animes, episodes, malTokens, playbackHistory, seasons, sessions, trackPreferences, users } from "../db/schema";
 import type { JellyfinClient, SonarrClient } from "../integrations/types";
@@ -18,6 +20,20 @@ export interface ResetResult {
   sonarr: { success: boolean; seriesDeleted: number };
   jellyfin: { success: boolean; itemsDeleted: number };
   db: { success: boolean; tables: Record<string, number> };
+  files: { success: boolean; empty: boolean };
+}
+
+/**
+ * Remove the contents of a directory but keep the directory itself.
+ * The directory is recreated if it does not exist.
+ */
+async function emptyDirectory(rootFolder: string): Promise<boolean> {
+  await mkdir(rootFolder, { recursive: true });
+  const entries = await readdir(rootFolder);
+  for (const entry of entries) {
+    await rm(join(rootFolder, entry), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+  return true;
 }
 
 export class ResetService {
@@ -25,6 +41,7 @@ export class ResetService {
     private readonly db: Db,
     private readonly jellyfin: JellyfinClient,
     private readonly sonarr: SonarrClient,
+    private readonly rootFolder?: string,
   ) {}
 
   async reset(): Promise<ResetResult> {
@@ -34,13 +51,25 @@ export class ResetService {
       sonarr.seriesDeleted = series.length;
       for (const s of series) {
         try {
-          await this.sonarr.deleteSeries(s.id, true);
+          // deleteFiles=false: remove the Sonarr series record only; the files
+          // on disk are emptied separately (keeping the root directory).
+          await this.sonarr.deleteSeries(s.id, false);
         } catch {
           // Sonarr can return 500 after the series is already removed; treat as done.
         }
       }
     } catch {
       sonarr.success = false;
+    }
+
+    const files = { success: true, empty: false };
+    if (this.rootFolder) {
+      try {
+        await emptyDirectory(this.rootFolder);
+        files.empty = true;
+      } catch {
+        files.success = false;
+      }
     }
 
     const jellyfin = { success: true, itemsDeleted: 0 };
@@ -80,6 +109,6 @@ export class ResetService {
       db.success = false;
     }
 
-    return { sonarr, jellyfin, db };
+    return { sonarr, jellyfin, db, files };
   }
 }

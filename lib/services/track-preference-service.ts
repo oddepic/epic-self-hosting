@@ -9,15 +9,34 @@ export interface TrackPreference {
   subtitleForced: boolean;
 }
 
+export const SUBTITLE_OFF = "off";
+
+const TEXT_SUBTITLE_CODECS = new Set([
+  "ass",
+  "ssa",
+  "srt",
+  "subrip",
+  "vtt",
+  "webvtt",
+  "mov_text",
+  "text",
+  "ttml",
+]);
+
+export function isTextSubtitleCodec(codec: string | null): boolean {
+  return codec != null && TEXT_SUBTITLE_CODECS.has(codec.toLowerCase());
+}
+
 export const DEFAULT_PREFERENCE: TrackPreference = {
   audioLanguage: "jpn",
-  subtitleLanguage: null,
+  subtitleLanguage: "eng",
   subtitleForced: false,
 };
 
 export interface StreamMatch {
   audioStreamIndex?: number;
   subtitleStreamIndex?: number;
+  burnInSubtitleStreamIndex?: number;
 }
 
 const LANGUAGE_ALIASES: Record<string, string> = {
@@ -69,23 +88,74 @@ export class TrackPreferenceService {
 
   matchStreams(streams: JellyfinMediaStream[], pref: TrackPreference): StreamMatch {
     const audio = normalizeLanguage(pref.audioLanguage);
-    const subtitle = normalizeLanguage(pref.subtitleLanguage);
 
     const audioIndex = audio
-      ? this.pickStream(streams, "Audio", audio, pref.subtitleForced, false)
-      : undefined;
-    const subtitleIndex = subtitle
-      ? this.pickSubtitle(streams, subtitle, pref.subtitleForced)
+      ? this.pickStream(streams, "Audio", audio, false)
       : undefined;
 
-    return { audioStreamIndex: audioIndex, subtitleStreamIndex: subtitleIndex };
+    const subtitleIndex = this.pickSubtitle(streams, pref);
+    const burnInSubtitleIndex = this.pickBurnInSubtitle(streams, pref);
+
+    return {
+      audioStreamIndex: audioIndex,
+      subtitleStreamIndex: subtitleIndex,
+      burnInSubtitleStreamIndex: burnInSubtitleIndex,
+    };
+  }
+
+  private pickBurnInSubtitle(streams: JellyfinMediaStream[], pref: TrackPreference): number | undefined {
+    if (pref.subtitleLanguage === SUBTITLE_OFF) return undefined;
+    const images = streams.filter(
+      (s) => s.type === "Subtitle" && !isTextSubtitleCodec(s.codec),
+    );
+    if (images.length === 0) return undefined;
+
+    const lang = normalizeLanguage(pref.subtitleLanguage);
+    if (lang) {
+      const sameLang = images.filter((s) => normalizeLanguage(s.language) === lang);
+      if (sameLang.length > 0) {
+        const exact = sameLang.filter((s) => s.isForced === pref.subtitleForced);
+        return this.pickPreferred(exact.length > 0 ? exact : sameLang);
+      }
+    }
+
+    const nonForced = images.filter((s) => !s.isForced);
+    return this.pickPreferred(nonForced.length > 0 ? nonForced : images);
+  }
+
+  private pickSubtitle(streams: JellyfinMediaStream[], pref: TrackPreference): number | undefined {
+    if (pref.subtitleLanguage === SUBTITLE_OFF) return undefined;
+    const text = streams.filter(
+      (s) => s.type === "Subtitle" && isTextSubtitleCodec(s.codec),
+    );
+    if (text.length === 0) return undefined;
+
+    const lang = normalizeLanguage(pref.subtitleLanguage);
+    if (lang) {
+      const sameLang = text.filter((s) => normalizeLanguage(s.language) === lang);
+      if (sameLang.length > 0) {
+        const exact = sameLang.filter((s) => s.isForced === pref.subtitleForced);
+        if (exact.length > 0) return this.pickPreferred(exact);
+        if (pref.subtitleForced) {
+          const forced = text.filter((s) => s.isForced);
+          return this.pickPreferred(forced.length > 0 ? forced : text);
+        }
+      }
+    }
+
+    const nonForced = text.filter((s) => !s.isForced);
+    return this.pickPreferred(nonForced.length > 0 ? nonForced : text);
+  }
+
+  private pickPreferred(streams: JellyfinMediaStream[]): number | undefined {
+    const preferred = streams.find((s) => s.isDefault);
+    return (preferred ?? streams[0])?.index;
   }
 
   private pickStream(
     streams: JellyfinMediaStream[],
     type: JellyfinMediaStream["type"],
     language: string,
-    _forced: boolean,
     requireDefault: boolean,
   ): number | undefined {
     const matches = streams.filter(
@@ -96,23 +166,6 @@ export class TrackPreferenceService {
     const preferred = matches.find((s) => requireDefault || s.isDefault);
     if (preferred) return preferred.index;
     return matches[0]!.index;
-  }
-
-  private pickSubtitle(
-    streams: JellyfinMediaStream[],
-    language: string,
-    wantForced: boolean,
-  ): number | undefined {
-    const subs = streams.filter(
-      (s) => s.type === "Subtitle" && normalizeLanguage(s.language) === language,
-    );
-    if (subs.length === 0) return undefined;
-
-    const forced = subs.filter((s) => s.isForced === wantForced);
-    const pool = forced.length > 0 ? forced : subs;
-
-    const preferred = pool.find((s) => s.isDefault) ?? pool[0]!;
-    return preferred.index;
   }
 
   getPreference(userId: number): TrackPreference | null {

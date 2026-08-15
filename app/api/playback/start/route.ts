@@ -11,8 +11,8 @@ export async function POST(request: NextRequest) {
   const jellyfin = new JellyfinSdkClient(
     config.jellyfinUrl,
     config.jellyfinApiKey,
-    { name: "Epic Self-Hosted", version: "0.1.0" },
-    { name: "browser", id: "epic-self-hosted-web" },
+    { name: "epic self-hosting", version: "0.1.0" },
+    { name: "browser", id: "epic-self-hosting-web" },
   );
   const service = new PlaybackService(db, jellyfin, {
     jellyfinUrl: config.jellyfinUrl,
@@ -24,7 +24,6 @@ export async function POST(request: NextRequest) {
     episodeId?: number;
     resume?: boolean;
     audioStreamIndex?: number;
-    subtitleStreamIndex?: number;
   };
   if (!body.episodeId) {
     return NextResponse.json({ error: "episodeId required" }, { status: 400 });
@@ -42,7 +41,6 @@ export async function POST(request: NextRequest) {
       resume: body.resume !== false,
       userId: user.id,
       audioStreamIndex: body.audioStreamIndex,
-      subtitleStreamIndex: body.subtitleStreamIndex,
     });
     return NextResponse.json(result);
   } catch (error) {

@@ -92,7 +92,7 @@ export class SonarrImportService {
         languages: item.languages,
         releaseGroup: item.releaseGroup ?? undefined,
         downloadId: undefined,
-        importMode: "copy",
+        importMode: "auto",
       })),
     );
 

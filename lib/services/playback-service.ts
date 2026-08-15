@@ -2,8 +2,7 @@ import { and, eq, gt, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { animes, episodes, seasons } from "../db/schema";
 import type { JellyfinClient } from "../integrations/types";
-import { isTextSubtitleCodec } from "../player/subtitles";
-import { TrackPreferenceService } from "./track-preference-service";
+import { TrackPreferenceService, isTextSubtitleCodec } from "./track-preference-service";
 
 export class EpisodeNotAvailableError extends Error {
   constructor() {
@@ -11,21 +10,63 @@ export class EpisodeNotAvailableError extends Error {
   }
 }
 
-export interface SubtitleTrackInfo {
-  index: number;
-  language: string | null;
-  isForced: boolean;
-  codec: string | null;
-  displayTitle: string | null;
-  isText: boolean;
-  url: string | null;
-}
-
 export interface AudioTrackInfo {
   index: number;
   language: string | null;
   codec: string | null;
   displayTitle: string | null;
+}
+
+export interface SubtitleTrackInfo {
+  index: number;
+  language: string | null;
+  codec: string | null;
+  isForced: boolean;
+  isDefault: boolean;
+  displayTitle: string | null;
+  deliveryUrl: string;
+}
+
+export interface FontAttachmentInfo {
+  index: number;
+  fileName: string | null;
+  mimeType: string | null;
+  deliveryUrl: string;
+}
+
+export function subtitleFormat(codec: string | null): string | null {
+  if (!codec) return null;
+  const c = codec.toLowerCase();
+  if (c === "subrip") return "srt";
+  if (c === "webvtt") return "vtt";
+  return c;
+}
+
+function trimTrailingSlash(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
+}
+
+export function buildSubtitleUrl(
+  baseUrl: string,
+  itemId: string,
+  mediaSourceId: string,
+  index: number,
+  codec: string | null,
+  token: string,
+): string | null {
+  const format = subtitleFormat(codec);
+  if (!format) return null;
+  return `${trimTrailingSlash(baseUrl)}/Videos/${itemId}/${mediaSourceId}/Subtitles/${index}/0/Stream.${format}?ApiKey=${token}`;
+}
+
+export function buildAttachmentUrl(
+  baseUrl: string,
+  itemId: string,
+  mediaSourceId: string,
+  index: number,
+  token: string,
+): string {
+  return `${trimTrailingSlash(baseUrl)}/Videos/${itemId}/${mediaSourceId}/Attachments/${index}?ApiKey=${token}`;
 }
 
 export interface PlaybackStartResult {
@@ -40,26 +81,11 @@ export interface PlaybackStartResult {
   seasonNumber: number;
   episodeNumber: number;
   animeTitle: string | null;
-  subtitleTracks: SubtitleTrackInfo[];
   audioTracks: AudioTrackInfo[];
-  fontUrls: string[];
   selectedAudioIndex: number | null;
+  subtitleTracks: SubtitleTrackInfo[];
+  fontAttachments: FontAttachmentInfo[];
   selectedSubtitleIndex: number | null;
-}
-
-const FONT_CODECS = new Set(["ttf", "otf", "woff", "woff2"]);
-
-function subtitleExtension(codec: string | null): string {
-  switch (codec?.toLowerCase()) {
-    case "ass":
-    case "ssa":
-      return "ass";
-    case "srt":
-    case "subrip":
-      return "srt";
-    default:
-      return codec ?? "ass";
-  }
 }
 
 export class PlaybackService {
@@ -79,7 +105,6 @@ export class PlaybackService {
       resume?: boolean;
       userId?: number;
       audioStreamIndex?: number;
-      subtitleStreamIndex?: number;
     } = {},
   ): Promise<PlaybackStartResult> {
     const episode = this.db
@@ -110,28 +135,6 @@ export class PlaybackService {
     const match = preferenceService.matchStreams(streams, prefs);
 
     const audioStreamIndex = options.audioStreamIndex ?? match.audioStreamIndex ?? null;
-    const subtitleStreamIndex = options.subtitleStreamIndex ?? match.subtitleStreamIndex ?? null;
-
-    const itemId = episode.jellyfinItemId;
-    const mediaSourceId = media.mediaSourceId;
-
-    const subtitleTracks = streams
-      .filter((s) => s.type === "Subtitle")
-      .map((s) => {
-        const isText = isTextSubtitleCodec(s.codec);
-        return {
-          index: s.index,
-          language: s.language,
-          isForced: s.isForced,
-          codec: s.codec,
-          displayTitle: s.displayTitle,
-          isText,
-          url:
-            isText && mediaSourceId != null
-              ? this.buildSubtitleUrl(itemId, mediaSourceId, s.index, s.codec, auth.accessToken)
-              : null,
-        } satisfies SubtitleTrackInfo;
-      });
 
     const audioTracks = streams
       .filter((s) => s.type === "Audio")
@@ -142,19 +145,49 @@ export class PlaybackService {
         displayTitle: s.displayTitle,
       }) satisfies AudioTrackInfo);
 
-    const fontUrls = media.attachments
-      .filter((a) => a.codec && FONT_CODECS.has(a.codec.toLowerCase()))
-      .map((a) =>
-        mediaSourceId != null
-          ? this.buildAttachmentUrl(itemId, mediaSourceId, a.index, auth.accessToken)
-          : null,
-      )
-      .filter((url): url is string => url != null);
+    const mediaSourceId = media.mediaSourceId ?? episode.jellyfinItemId;
+    const subtitleTracks = streams
+      .filter((s) => s.type === "Subtitle" && isTextSubtitleCodec(s.codec))
+      .flatMap((s) => {
+        const deliveryUrl = buildSubtitleUrl(
+          this.config.jellyfinUrl,
+          episode.jellyfinItemId!,
+          mediaSourceId,
+          s.index,
+          s.codec,
+          auth.accessToken,
+        );
+        if (!deliveryUrl) return [];
+        return [
+          {
+            index: s.index,
+            language: s.language,
+            codec: s.codec,
+            isForced: s.isForced,
+            isDefault: s.isDefault,
+            displayTitle: s.displayTitle,
+            deliveryUrl,
+          } satisfies SubtitleTrackInfo,
+        ];
+      });
 
-    const selectedSubtitle = subtitleStreamIndex != null
-      ? subtitleTracks.find((t) => t.index === subtitleStreamIndex)
-      : null;
-    const burnInSubtitles = selectedSubtitle != null && !selectedSubtitle.isText;
+    const fontAttachments = media.attachments.map(
+      (a) =>
+        ({
+          index: a.index,
+          fileName: a.fileName,
+          mimeType: a.mimeType,
+          deliveryUrl: buildAttachmentUrl(
+            this.config.jellyfinUrl,
+            episode.jellyfinItemId!,
+            mediaSourceId,
+            a.index,
+            auth.accessToken,
+          ),
+        }) satisfies FontAttachmentInfo,
+    );
+
+    const burnInSubtitleIndex = subtitleTracks.length === 0 ? match.burnInSubtitleStreamIndex : undefined;
 
     const playbackInfo = await this.jellyfin.getPlaybackInfo(
       episode.jellyfinItemId,
@@ -162,8 +195,7 @@ export class PlaybackService {
       auth.accessToken,
       startPositionTicks,
       audioStreamIndex ?? undefined,
-      burnInSubtitles ? subtitleStreamIndex ?? undefined : undefined,
-      burnInSubtitles,
+      burnInSubtitleIndex,
     );
 
     return {
@@ -178,32 +210,12 @@ export class PlaybackService {
       seasonNumber: season?.number ?? 1,
       episodeNumber: episode.episodeNumber,
       animeTitle: anime?.titleRomaji ?? anime?.titleEnglish ?? null,
-      subtitleTracks,
       audioTracks,
-      fontUrls,
       selectedAudioIndex: audioStreamIndex,
-      selectedSubtitleIndex: subtitleStreamIndex,
+      subtitleTracks,
+      fontAttachments,
+      selectedSubtitleIndex: match.subtitleStreamIndex ?? null,
     };
-  }
-
-  private buildSubtitleUrl(
-    itemId: string,
-    mediaSourceId: string,
-    streamIndex: number,
-    codec: string | null,
-    token: string,
-  ): string {
-    const ext = subtitleExtension(codec);
-    return `${this.config.jellyfinUrl}/Videos/${itemId}/${mediaSourceId}/Subtitles/${streamIndex}/0/Stream.${ext}?ApiKey=${token}`;
-  }
-
-  private buildAttachmentUrl(
-    itemId: string,
-    mediaSourceId: string,
-    attachmentIndex: number,
-    token: string,
-  ): string {
-    return `${this.config.jellyfinUrl}/Videos/${itemId}/${mediaSourceId}/Attachments/${attachmentIndex}?ApiKey=${token}`;
   }
 
   getNextAvailableEpisode(episodeId: number): number | null {

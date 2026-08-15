@@ -10,6 +10,7 @@ interface ResetStatus {
   sonarr: { success: boolean; seriesDeleted: number };
   jellyfin: { success: boolean; itemsDeleted: number };
   db: { success: boolean; tables: Record<string, number> };
+  files: { success: boolean; empty: boolean };
 }
 
 function ConnectionStatus({ linked }: { linked: boolean | null }) {
@@ -38,10 +39,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [settingUpSonarr, setSettingUpSonarr] = useState(false);
   const [sonarrSetupResult, setSonarrSetupResult] = useState<string | null>(null);
-  const [prefAudio, setPrefAudio] = useState("");
-  const [prefSubtitle, setPrefSubtitle] = useState("");
-  const [prefForced, setPrefForced] = useState(false);
-  const [prefSaved, setPrefSaved] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetResult, setResetResult] = useState<string | null>(null);
   const [resetStatus, setResetStatus] = useState<ResetStatus | null>(null);
@@ -185,35 +182,8 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
     }
   }
 
-  async function onSavePreferences() {
-    setPrefSaved(false);
-    const res = await fetch("/api/preferences", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        audioLanguage: prefAudio || null,
-        subtitleLanguage: prefSubtitle || null,
-        subtitleForced: prefForced,
-      }),
-    });
-    if (res.ok) setPrefSaved(true);
-  }
-
-  async function onLoadPreferences() {
-    setPrefSaved(false);
-    const res = await fetch("/api/preferences");
-    if (res.ok) {
-      const body = (await res.json()) as {
-        preference: { audioLanguage: string | null; subtitleLanguage: string | null; subtitleForced: boolean } | null;
-      };
-      setPrefAudio(body.preference?.audioLanguage ?? "");
-      setPrefSubtitle(body.preference?.subtitleLanguage ?? "");
-      setPrefForced(body.preference?.subtitleForced ?? false);
-    }
-  }
-
   async function onHardReset() {
-    if (!window.confirm("Hard reset? This deletes ALL Sonarr series (files on disk), purges the Jellyfin library, and wipes the app database — back to a brand-new user.")) {
+    if (!window.confirm("Hard reset? This removes ALL Sonarr series and empties the anime folder (the folder itself is kept), purges the Jellyfin library, and wipes the app database — back to a brand-new user.")) {
       return;
     }
     setResetting(true);
@@ -237,42 +207,6 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
 
   return (
     <div className="max-w-2xl">
-      <SettingSection title="Playback">
-        <SettingRow label="Audio language" description="ISO-639 code applied at playback (jpn, spa, eng…).">
-          <Input
-            type="text"
-            value={prefAudio}
-            onChange={(e) => setPrefAudio(e.target.value)}
-            placeholder="jpn"
-            className="w-28"
-          />
-        </SettingRow>
-        <SettingRow label="Subtitle language" description="ISO-639 code applied at playback.">
-          <Input
-            type="text"
-            value={prefSubtitle}
-            onChange={(e) => setPrefSubtitle(e.target.value)}
-            placeholder="spa"
-            className="w-28"
-          />
-        </SettingRow>
-        <SettingRow label="Forced subtitles only">
-          <input
-            type="checkbox"
-            checked={prefForced}
-            onChange={(e) => setPrefForced(e.target.checked)}
-            className="h-4 w-4 accent-accent"
-          />
-        </SettingRow>
-        <SettingRow label="Track preferences">
-          <Button onClick={onLoadPreferences}>Load</Button>
-          <Button variant="primary" onClick={onSavePreferences}>
-            Save
-          </Button>
-          {prefSaved && <span className="text-xs text-success">Saved.</span>}
-        </SettingRow>
-      </SettingSection>
-
       <SettingSection title="Integrations">
         <SettingRow label="MyAnimeList" description="Status changes and completed episodes push automatically while connected.">
           <ConnectionStatus linked={linked} />
@@ -330,7 +264,7 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
 
       <SettingSection title="System">
         <SettingRow label="About" description="Self-hosted anime platform — Jellyfin, Sonarr and MAL in one place." />
-        <SettingRow label="Hard reset" description="Deletes all Sonarr series, purges Jellyfin, and wipes the app database.">
+        <SettingRow label="Hard reset" description="Removes all Sonarr series, empties the anime folder (kept on disk), purges Jellyfin, and wipes the app database.">
           <Button variant="danger" onClick={() => void onHardReset()} disabled={resetting}>
             {resetting ? "Resetting…" : "Hard reset"}
           </Button>
@@ -341,6 +275,7 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
         <div className="mt-2 flex flex-col gap-1.5 text-sm">
           <ResetLine ok={resetStatus.sonarr.success} label={`Sonarr — success (${resetStatus.sonarr.seriesDeleted} series removed)`} />
           <ResetLine ok={resetStatus.jellyfin.success} label={`Jellyfin — success (${resetStatus.jellyfin.itemsDeleted} items removed)`} />
+          <ResetLine ok={resetStatus.files.success} label={`Files - success (anime folder emptied, kept on disk)`} />
           <ResetLine
             ok={resetStatus.db.success}
             label={`Database — success (${Object.keys(resetStatus.db.tables).join(", ")})`}

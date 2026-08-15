@@ -11,8 +11,8 @@ export interface PlayerContextValue {
   state: PlayerState;
   play: (episodeId: number, resume?: boolean) => Promise<void>;
   close: () => void;
-  setSubtitle: (index: number | null) => void;
   setAudio: (index: number) => Promise<void>;
+  setSubtitle: (index: number | null) => void;
   session: PlaybackStart | null;
   mode: "hidden" | "big" | "mini";
 }
@@ -35,11 +35,18 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function saveTrackPreference(body: Record<string, unknown>): void {
+  void fetch("/api/preferences", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const subtitleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
   const pendingSkipRef = useRef(0);
   const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -53,7 +60,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [router],
   );
 
-  const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef, subtitleCanvasRef });
+  const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef });
   const isWatchRoute = (pathname ?? "").startsWith("/watch/");
 
   const mode: PlayerContextValue["mode"] = isWatchRoute
@@ -62,16 +69,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       ? "mini"
       : "hidden";
   const value = useMemo<PlayerContextValue>(
-    () => ({ videoRef, state, play, close, setSubtitle, setAudio, session: state.session, mode }),
-    [videoRef, state, play, close, setSubtitle, setAudio, mode],
+    () => ({ videoRef, state, play, close, setAudio, setSubtitle, session: state.session, mode }),
+    [videoRef, state, play, close, setAudio, setSubtitle, mode],
   );
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [dragFraction, setDragFraction] = useState<number | null>(null);
   const [volume, setVolume] = useState(1);
-  const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
+  const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controlsHoveredRef = useRef(false);
 
@@ -126,20 +133,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (video) video.volume = level;
   }, []);
 
-  const onPickSubtitle = useCallback(
-    (index: number | null) => {
-      setSubtitleMenuOpen(false);
-      setSubtitle(index);
-    },
-    [setSubtitle],
-  );
-
   const onPickAudio = useCallback(
     (index: number) => {
       setAudioMenuOpen(false);
       void setAudio(index);
+      const track = state.session?.audioTracks.find((t) => t.index === index);
+      if (track?.language) saveTrackPreference({ audioLanguage: track.language });
     },
-    [setAudio],
+    [setAudio, state.session],
+  );
+
+  const onPickSubtitle = useCallback(
+    (index: number | null) => {
+      setSubtitleMenuOpen(false);
+      setSubtitle(index);
+      const track =
+        index == null ? null : (state.session?.subtitleTracks.find((t) => t.index === index) ?? null);
+      saveTrackPreference(
+        track
+          ? { subtitleLanguage: track.language, subtitleForced: track.isForced }
+          : { subtitleLanguage: "off", subtitleForced: false },
+      );
+    },
+    [setSubtitle, state.session],
   );
 
   const skip = useCallback(
@@ -248,9 +264,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         >
           {/* Media layer — independent of the overlay layers. It owns the
               clip (overflow-hidden) and the video's black background, so the
-              video's letterbox edge can never bleed into the overlays. The
-              subtitle canvas lives here too, sharing the video's offset
-              parent and clip. */}
+              video's letterbox edge can never bleed into the overlays. */}
           <div
             className={
               mode === "big"
@@ -263,10 +277,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               autoPlay
               crossOrigin="anonymous"
               className="h-full w-full object-contain"
-            />
-            <canvas
-              ref={subtitleCanvasRef}
-              className="pointer-events-none absolute"
             />
           </div>
 
@@ -429,7 +439,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
                   <div className="relative">
                     <button
-                      onClick={() => setAudioMenuOpen((o) => !o)}
+                      onClick={() => {
+                        setAudioMenuOpen((o) => !o);
+                        setSubtitleMenuOpen(false);
+                      }}
                       aria-label="Audio track"
                       className={`rounded-lg p-2 transition-colors hover:bg-surface-hover ${
                         audioMenuOpen ? "text-accent" : "text-text-secondary hover:text-text-primary"
@@ -454,10 +467,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                     )}
                   </div>
 
+
                   <div className="relative">
                     <button
-                      onClick={() => setSubtitleMenuOpen((o) => !o)}
-                      aria-label="Subtitles"
+                      onClick={() => {
+                        setSubtitleMenuOpen((o) => !o);
+                        setAudioMenuOpen(false);
+                      }}
+                      aria-label="Subtitle track"
                       className={`rounded-lg p-2 transition-colors hover:bg-surface-hover ${
                         subtitleMenuOpen ? "text-accent" : "text-text-secondary hover:text-text-primary"
                       }`}
@@ -468,8 +485,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       <div className="absolute bottom-12 right-0 max-h-64 w-56 overflow-y-auto rounded-xl border border-border-strong bg-surface p-1">
                         <button
                           onClick={() => onPickSubtitle(null)}
-                          className={`w-full rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
-                            state.activeSubtitleIndex == null ? "text-accent" : "text-text-secondary"
+                          className={`w-full truncate rounded-lg px-3 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover ${
+                            state.activeSubtitleIndex === null ? "text-accent" : "text-text-secondary"
                           }`}
                         >
                           Off
@@ -488,6 +505,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       </div>
                     )}
                   </div>
+
 
                   <button
                     onClick={() => router.push("/")}

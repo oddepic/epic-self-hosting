@@ -133,23 +133,27 @@ describe("ResetService", () => {
     db.insert(episodes).values({ seasonId: season.id, episodeNumber: 1 }).run();
   });
 
-  it("deletes Sonarr series with files, purges Jellyfin items, and wipes the app tables", async () => {
+  it("removes Sonarr series WITHOUT deleting files, empties the root folder (kept on disk), purges Jellyfin, and wipes the app tables", async () => {
     const sonarr = fakeSonarr();
     const jellyfin = fakeJellyfin();
-    const service = new ResetService(db, jellyfin, sonarr);
+    const service = new ResetService(db, jellyfin, sonarr, "C:/reset-files");
 
     const result = await service.reset();
 
+    // deleteFiles must be FALSE — Sonarr must not remove files (that can take
+    // the root folder directory with it). The folder is emptied separately.
     expect(sonarr.deleted).toEqual([
-      { id: 21, deleteFiles: true },
-      { id: 22, deleteFiles: true },
+      { id: 21, deleteFiles: false },
+      { id: 22, deleteFiles: false },
     ]);
+    expect(result.files).toEqual({ success: true, empty: true });
     expect(jellyfin.deleted).toEqual(["a", "b", "c"]);
     expect(jellyfin.refreshed).toBe(1);
     expect(result).toEqual({
       sonarr: { success: true, seriesDeleted: 2 },
       jellyfin: { success: true, itemsDeleted: 3 },
       db: { success: true, tables: expect.objectContaining({ users: 0, animes: 0, episodes: 0 }) },
+      files: { success: true, empty: true },
     });
     expect(db.select().from(animes).all()).toHaveLength(0);
     expect(db.select().from(seasons).all()).toHaveLength(0);
@@ -161,20 +165,18 @@ describe("ResetService", () => {
     expect(db.select().from(sessions).all()).toHaveLength(0);
   });
 
-  it("tolerates empty Sonarr and Jellyfin state", async () => {
+  it("tolerates empty Sonarr and Jellyfin state and a missing root folder", async () => {
     const sonarr = fakeSonarr();
     sonarr.getSeries = async () => [];
     const jellyfin = fakeJellyfin();
     jellyfin.listAllItemIds = async () => [];
-    const service = new ResetService(db, jellyfin, sonarr);
+    const service = new ResetService(db, jellyfin, sonarr, "C:/does-not-exist-for-test");
 
     const result = await service.reset();
 
-    expect(result).toEqual({
-      sonarr: { success: true, seriesDeleted: 0 },
-      jellyfin: { success: true, itemsDeleted: 0 },
-      db: { success: true, tables: expect.objectContaining({ users: 0 }) },
-    });
+    expect(result.sonarr).toEqual({ success: true, seriesDeleted: 0 });
+    expect(result.jellyfin).toEqual({ success: true, itemsDeleted: 0 });
+    expect(result.files).toEqual({ success: true, empty: true });
     expect(db.select().from(animes).all()).toHaveLength(0);
   });
 
@@ -183,13 +185,24 @@ describe("ResetService", () => {
     sonarr.deleteSeries = async () => {
       throw new Error("Expected query to return 1 rows but returned 0");
     };
-    const service = new ResetService(db, fakeJellyfin(), sonarr);
+    const service = new ResetService(db, fakeJellyfin(), sonarr, "C:/reset-files");
 
     const result = await service.reset();
 
     expect(result.sonarr).toEqual({ success: true, seriesDeleted: 2 });
     expect(db.select().from(animes).all()).toHaveLength(0);
   });
+
+  it("reports files failure when the folder cannot be emptied", async () => {
+    const sonarr = fakeSonarr();
+    sonarr.getSeries = async () => [];
+    const jellyfin = fakeJellyfin();
+    jellyfin.listAllItemIds = async () => [];
+    const service = new ResetService(db, jellyfin, sonarr, "Z:/definitely-not-a-real-drive");
+
+    const result = await service.reset();
+
+    expect(result.files.success).toBe(false);
+    expect(result.files.empty).toBe(false);
+  });
 });
-
-
