@@ -13,8 +13,8 @@ export async function POST() {
   const jellyfin = new JellyfinSdkClient(
     config.jellyfinUrl,
     config.jellyfinApiKey,
-    { name: "Epic Self-Hosted", version: "0.1.0" },
-    { name: "server", id: "epic-self-hosted-server" },
+    { name: "epic self-hosting", version: "0.1.0" },
+    { name: "server", id: "epic-self-hosting-server" },
   );
   const sonarr = new SonarrHttpClient(config.sonarrUrl, config.sonarrApiKey);
 

@@ -15,7 +15,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Epic Self-Hosted",
+  title: "epic self-hosting",
   description: "Self-hosted anime platform",
 };
 

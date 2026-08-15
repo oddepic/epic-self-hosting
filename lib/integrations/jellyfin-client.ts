@@ -133,8 +133,8 @@ export class JellyfinSdkClient implements JellyfinClient {
   ): Promise<JellyfinPlaybackInfo> {
     return this.withFreshAuth(accessToken, async (token) => {
       const api = new Jellyfin({
-        clientInfo: { name: "Epic Self-Hosted", version: "0.1.0" },
-        deviceInfo: { name: "browser", id: "epic-self-hosted-player" },
+        clientInfo: { name: "epic self-hosting", version: "0.1.0" },
+        deviceInfo: { name: "browser", id: "epic-self-hosting-player" },
       }).createApi(this.api.basePath, token);
 
       const { data } = await getMediaInfoApi(api).getPostedPlaybackInfo({
@@ -183,7 +183,7 @@ export class JellyfinSdkClient implements JellyfinClient {
     const params = new URLSearchParams({
       Static: "true",
       mediaSourceId: mediaSourceId ?? itemId,
-      deviceId: "epic-self-hosted-player",
+      deviceId: "epic-self-hosting-player",
       ApiKey: token,
     });
     if (etag) params.set("Tag", etag);
@@ -193,8 +193,8 @@ export class JellyfinSdkClient implements JellyfinClient {
   async getMediaStreams(itemId: string, accessToken: string): Promise<JellyfinMediaStream[]> {
     return this.withFreshAuth(accessToken, async (token) => {
       const api = new Jellyfin({
-        clientInfo: { name: "Epic Self-Hosted", version: "0.1.0" },
-        deviceInfo: { name: "browser", id: "epic-self-hosted-player" },
+        clientInfo: { name: "epic self-hosting", version: "0.1.0" },
+        deviceInfo: { name: "browser", id: "epic-self-hosting-player" },
       }).createApi(this.api.basePath, token);
       const { data } = await getUserLibraryApi(api).getItem({ itemId });
       const source = data.MediaSources?.[0];
@@ -215,8 +215,8 @@ export class JellyfinSdkClient implements JellyfinClient {
   async getMediaSource(itemId: string, accessToken: string): Promise<JellyfinMediaSource> {
     return this.withFreshAuth(accessToken, async (token) => {
       const api = new Jellyfin({
-        clientInfo: { name: "Epic Self-Hosted", version: "0.1.0" },
-        deviceInfo: { name: "browser", id: "epic-self-hosted-player" },
+        clientInfo: { name: "epic self-hosting", version: "0.1.0" },
+        deviceInfo: { name: "browser", id: "epic-self-hosting-player" },
       }).createApi(this.api.basePath, token);
       const { data } = await getUserLibraryApi(api).getItem({ itemId });
       const source = data.MediaSources?.[0];
