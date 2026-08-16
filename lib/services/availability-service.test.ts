@@ -6,7 +6,7 @@ import { AvailabilityService, sanitizeEpisodeTitle } from "./availability-servic
 import type { JellyfinEpisodeItem, JellyfinSeriesItem, SonarrClient, SonarrSeries } from "../integrations/types";
 
 function fakeSonarr(behavior: {
-  episodes?: { seasonNumber: number; episodeNumber: number; absoluteEpisodeNumber: number | null; id: number }[];
+  episodes?: { seasonNumber: number; episodeNumber: number; absoluteEpisodeNumber: number | null; id: number; title?: string | null }[];
   series?: SonarrSeries[];
 } = {}) {
   return {
@@ -469,6 +469,68 @@ describe("AvailabilityService.sync", () => {
 
     const row = db.select().from(episodes).where(eq(episodes.id, episodeId)).get();
     expect(row!.title).toBe("The Journey's End");
+  });
+
+  it("backfills episode titles from Sonarr for rows without one", async () => {
+    const { episodeId } = seedAnime(db, { sonarrId: 42 });
+    service = new AvailabilityService(
+      db,
+      fakeJellyfin(),
+      fakeSonarr({
+        episodes: [
+          { id: 101, seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: 1, title: "Stick Swinger" },
+        ],
+      }),
+      { rebuildDelayMs: 0 },
+    );
+    await service.sync();
+
+    const row = db.select().from(episodes).where(eq(episodes.id, episodeId)).get();
+    expect(row!.title).toBe("Stick Swinger");
+  });
+
+  it("keeps existing titles and skips junk Sonarr titles when backfilling", async () => {
+    const { seasonId, episodeId } = seedAnime(db, { sonarrId: 42 });
+    db.update(episodes).set({ title: "Keep Me" }).where(eq(episodes.id, episodeId)).run();
+    db.insert(episodes).values({ seasonId, episodeNumber: 2, progressSeconds: 0 }).run();
+    service = new AvailabilityService(
+      db,
+      fakeJellyfin(),
+      fakeSonarr({
+        episodes: [
+          { id: 101, seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: 1, title: "Overwrite Attempt" },
+          { id: 102, seasonNumber: 1, episodeNumber: 2, absoluteEpisodeNumber: 2, title: "Frieren: Beyond Journey's End" },
+        ],
+      }),
+      { rebuildDelayMs: 0 },
+    );
+    await service.sync();
+
+    const rows = db
+      .select()
+      .from(episodes)
+      .where(eq(episodes.seasonId, seasonId))
+      .orderBy(episodes.episodeNumber)
+      .all();
+    expect(rows[0]!.title).toBe("Keep Me");
+    expect(rows[1]!.title).toBeNull();
+  });
+
+  it("does not let a Jellyfin fallback clobber a Sonarr-backfilled title", async () => {
+    const { episodeId } = seedAnime(db, { sonarrId: 42 });
+    db.update(episodes).set({ title: "Stick Swinger" }).where(eq(episodes.id, episodeId)).run();
+    service = new AvailabilityService(
+      db,
+      fakeJellyfin({
+        series: [makeSeries()],
+        episodes: [makeEpisodeItem({ name: "Frieren: Beyond Journey's End" })],
+      }),
+      fakeSonarr(),
+    );
+    await service.sync();
+
+    const row = db.select().from(episodes).where(eq(episodes.id, episodeId)).get();
+    expect(row!.title).toBe("Stick Swinger");
   });
 });
 

@@ -56,6 +56,7 @@ export interface SonarrEpisode {
   seasonNumber: number;
   episodeNumber: number;
   absoluteEpisodeNumber: number | null;
+  title: string | null;
 }
 
 export interface SonarrSeries {

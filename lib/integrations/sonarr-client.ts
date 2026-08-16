@@ -28,6 +28,7 @@ interface SonarrEpisodeResource {
   seasonNumber: number;
   episodeNumber: number;
   absoluteEpisodeNumber: number | null;
+  title: string | null;
 }
 
 export class SonarrHttpClient implements SonarrClient {
@@ -87,6 +88,7 @@ export class SonarrHttpClient implements SonarrClient {
       seasonNumber: e.seasonNumber,
       episodeNumber: e.episodeNumber,
       absoluteEpisodeNumber: e.absoluteEpisodeNumber,
+      title: e.title,
     }));
   }
 

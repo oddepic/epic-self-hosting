@@ -141,40 +141,71 @@ export class AvailabilityService {
         }
       }
 
-      if (anime.sonarrId != null && this.sonarr && (seasonByAnime.get(anime.id) ?? []).length === 0) {
+      if (anime.sonarrId != null && this.sonarr) {
         try {
           const sonarrEpisodes = await this.sonarr.getEpisodes(anime.sonarrId);
-          const bySeason = new Map<number, { id: number; episodeNumber: number; absoluteEpisodeNumber: number | null }[]>();
-          for (const ep of sonarrEpisodes) {
-            const list = bySeason.get(ep.seasonNumber) ?? [];
-            list.push(ep);
-            bySeason.set(ep.seasonNumber, list);
-          }
-          for (const [number, eps] of bySeason) {
-            const season = this.db
-              .insert(seasons)
-              .values({ animeId: anime.id, number })
-              .returning()
-              .get();
-            for (const ep of eps) {
-              this.db
-                .insert(episodes)
-                .values({
-                  seasonId: season.id,
-                  episodeNumber: ep.episodeNumber,
-                  absoluteNumber: ep.absoluteEpisodeNumber,
-                  sonarrEpisodeId: ep.id,
-                })
-                .run();
+          const existingSeasons = seasonByAnime.get(anime.id) ?? [];
+          if (existingSeasons.length === 0) {
+            const bySeason = new Map<number, { id: number; episodeNumber: number; absoluteEpisodeNumber: number | null }[]>();
+            for (const ep of sonarrEpisodes) {
+              const list = bySeason.get(ep.seasonNumber) ?? [];
+              list.push(ep);
+              bySeason.set(ep.seasonNumber, list);
+            }
+            for (const [number, eps] of bySeason) {
+              const season = this.db
+                .insert(seasons)
+                .values({ animeId: anime.id, number })
+                .returning()
+                .get();
+              for (const ep of eps) {
+                this.db
+                  .insert(episodes)
+                  .values({
+                    seasonId: season.id,
+                    episodeNumber: ep.episodeNumber,
+                    absoluteNumber: ep.absoluteEpisodeNumber,
+                    sonarrEpisodeId: ep.id,
+                  })
+                  .run();
+              }
+            }
+            const freshSeasons = this.db.select().from(seasons).where(eq(seasons.animeId, anime.id)).all();
+            seasonByAnime.set(anime.id, freshSeasons);
+            for (const season of freshSeasons) {
+              allEpisodes.push(...this.db.select().from(episodes).where(eq(episodes.seasonId, season.id)).all());
+            }
+          } else {
+            // Sonarr's episode list carries the TVDB titles (the same ones
+            // its renamer uses). Backfill rows that have no real title yet;
+            // existing titles are never overwritten and junk (series-name
+            // fallbacks) is filtered through the same sanitizer as Jellyfin's.
+            const titleByKey = new Map<string, string>();
+            for (const ep of sonarrEpisodes) {
+              if (ep.title) titleByKey.set(`${ep.seasonNumber}:${ep.episodeNumber}`, ep.title);
+            }
+            for (const season of existingSeasons) {
+              for (const episode of allEpisodes.filter((e) => e.seasonId === season.id)) {
+                if (episode.title != null) continue;
+                const sonarrTitle = titleByKey.get(`${season.number}:${episode.episodeNumber}`);
+                if (!sonarrTitle) continue;
+                const clean = sanitizeEpisodeTitle(sonarrTitle, [
+                  anime.titleRomaji,
+                  anime.titleEnglish,
+                  anime.titleNative,
+                ]);
+                if (clean != null) {
+                  this.db
+                    .update(episodes)
+                    .set({ title: clean })
+                    .where(eq(episodes.id, episode.id))
+                    .run();
+                }
+              }
             }
           }
         } catch {
           // Materialization is best-effort; a later sync retries.
-        }
-        const freshSeasons = this.db.select().from(seasons).where(eq(seasons.animeId, anime.id)).all();
-        seasonByAnime.set(anime.id, freshSeasons);
-        for (const season of freshSeasons) {
-          allEpisodes.push(...this.db.select().from(episodes).where(eq(episodes.seasonId, season.id)).all());
         }
       }
 
@@ -209,13 +240,18 @@ export class AvailabilityService {
             changes.jellyfinItemId = item.id;
           }
           if (item.name) {
-            const cleanTitle = sanitizeEpisodeTitle(item.name, [
+            const seriesTitles = [
               matched.title,
               anime.titleRomaji,
               anime.titleEnglish,
               anime.titleNative,
-            ]);
-            if (episode.title !== cleanTitle) {
+            ];
+            const cleanTitle = sanitizeEpisodeTitle(item.name, seriesTitles);
+            // A fallback name that sanitizes to null must not clobber a real
+            // title (e.g. one backfilled from Sonarr); junk-to-null is fine.
+            const currentIsJunk =
+              episode.title != null && sanitizeEpisodeTitle(episode.title, seriesTitles) !== episode.title;
+            if (episode.title !== cleanTitle && (cleanTitle != null || currentIsJunk)) {
               changes.title = cleanTitle;
             }
           }
