@@ -109,6 +109,9 @@ function fakeJellyfin(): JellyfinClient & { deleted: string[]; refreshed: number
     async getPlaybackInfo() {
       return { url: "http://x", playMethod: "DirectStream" as const, mediaSourceId: null, playSessionId: null };
     },
+    async getIntroSkipperSegments() {
+      return { intro: null, credits: null };
+    },
     async requestPlayback() {},
     async listAllItemIds() {
       return ["a", "b", "c"];

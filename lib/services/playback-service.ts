@@ -1,7 +1,7 @@
 import { and, eq, gt, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { animes, episodes, seasons } from "../db/schema";
-import type { JellyfinClient } from "../integrations/types";
+import type { JellyfinClient, JellyfinSkipSegments } from "../integrations/types";
 import { TrackPreferenceService, isTextSubtitleCodec } from "./track-preference-service";
 
 export class EpisodeNotAvailableError extends Error {
@@ -76,7 +76,9 @@ export interface PlaybackStartResult {
   mediaSourceId: string | null;
   playSessionId: string | null;
   playMethod: "Transcode" | "DirectStream" | "DirectPlay";
+  videoCodec: string | null;
   nextEpisodeId: number | null;
+  nextEpisodeNumber: number | null;
   episodeId: number;
   seasonNumber: number;
   episodeNumber: number;
@@ -86,6 +88,7 @@ export interface PlaybackStartResult {
   subtitleTracks: SubtitleTrackInfo[];
   fontAttachments: FontAttachmentInfo[];
   selectedSubtitleIndex: number | null;
+  skipSegments: JellyfinSkipSegments;
 }
 
 export class PlaybackService {
@@ -130,6 +133,7 @@ export class PlaybackService {
 
     const media = await this.jellyfin.getMediaSource(episode.jellyfinItemId, auth.accessToken);
     const streams = media.streams;
+    const videoCodec = streams.find((s) => s.type === "Video")?.codec ?? null;
     const preferenceService = new TrackPreferenceService(this.db);
     const prefs = preferenceService.getPreferenceForEpisode(options.userId, episodeId);
     const match = preferenceService.matchStreams(streams, prefs);
@@ -189,14 +193,23 @@ export class PlaybackService {
 
     const burnInSubtitleIndex = subtitleTracks.length === 0 ? match.burnInSubtitleStreamIndex : undefined;
 
-    const playbackInfo = await this.jellyfin.getPlaybackInfo(
-      episode.jellyfinItemId,
-      auth.userId,
-      auth.accessToken,
-      startPositionTicks,
-      audioStreamIndex ?? undefined,
-      burnInSubtitleIndex,
-    );
+    const [playbackInfo, skipSegments] = await Promise.all([
+      this.jellyfin.getPlaybackInfo(
+        episode.jellyfinItemId,
+        auth.userId,
+        auth.accessToken,
+        startPositionTicks,
+        audioStreamIndex ?? undefined,
+        burnInSubtitleIndex,
+      ),
+      // Intro Skipper segments are advisory only — a missing plugin or an
+      // unanalyzed episode must never break playback.
+      this.jellyfin
+        .getIntroSkipperSegments(episode.jellyfinItemId, auth.accessToken)
+        .catch(() => ({ intro: null, credits: null }) satisfies JellyfinSkipSegments),
+    ]);
+
+    const nextEpisode = this.getNextAvailableEpisode(episodeId);
 
     return {
       url: playbackInfo.url,
@@ -205,7 +218,9 @@ export class PlaybackService {
       mediaSourceId: playbackInfo.mediaSourceId,
       playSessionId: playbackInfo.playSessionId,
       playMethod: playbackInfo.playMethod,
-      nextEpisodeId: this.getNextAvailableEpisode(episodeId),
+      videoCodec,
+      nextEpisodeId: nextEpisode?.id ?? null,
+      nextEpisodeNumber: nextEpisode?.episodeNumber ?? null,
       episodeId: episode.id,
       seasonNumber: season?.number ?? 1,
       episodeNumber: episode.episodeNumber,
@@ -215,10 +230,11 @@ export class PlaybackService {
       subtitleTracks,
       fontAttachments,
       selectedSubtitleIndex: match.subtitleStreamIndex ?? null,
+      skipSegments,
     };
   }
 
-  getNextAvailableEpisode(episodeId: number): number | null {
+  getNextAvailableEpisode(episodeId: number): { id: number; seasonNumber: number; episodeNumber: number } | null {
     const episode = this.db
       .select()
       .from(episodes)
@@ -250,6 +266,8 @@ export class PlaybackService {
       .orderBy(seasons.number, episodes.episodeNumber)
       .get();
 
-    return next?.id ?? null;
+    return next
+      ? { id: next.id, seasonNumber: next.seasonNumber, episodeNumber: next.episodeNumber }
+      : null;
   }
 }

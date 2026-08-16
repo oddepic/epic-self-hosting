@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
   const user = await new UserService(db, config).ensureConfiguredUser();
   const service = new PlaybackSettingsService(db);
 
-  const body = (await request.json()) as { autoplayNext?: unknown; skipSeconds?: unknown };
+  const body = (await request.json()) as { autoplayNext?: unknown; skipSeconds?: unknown; volume?: unknown };
   const current = service.getSettings(user.id);
 
   const next = {
@@ -26,6 +26,10 @@ export async function POST(request: NextRequest) {
       typeof body.skipSeconds === "number" && Number.isFinite(body.skipSeconds) && body.skipSeconds >= 1 && body.skipSeconds <= 60
         ? body.skipSeconds
         : current.skipSeconds,
+    volume:
+      typeof body.volume === "number" && Number.isFinite(body.volume) && body.volume >= 0 && body.volume <= 1
+        ? body.volume
+        : current.volume,
   };
 
   return NextResponse.json(service.saveSettings(user.id, next));

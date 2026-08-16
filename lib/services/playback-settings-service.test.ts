@@ -25,20 +25,23 @@ describe("PlaybackSettingsService", () => {
   });
 
   it("saves and reloads settings", () => {
-    service.saveSettings(userId, { autoplayNext: false, skipSeconds: 10 });
-    expect(service.getSettings(userId)).toEqual({ autoplayNext: false, skipSeconds: 10 });
+    service.saveSettings(userId, { autoplayNext: false, skipSeconds: 10, volume: 0.4 });
+    expect(service.getSettings(userId)).toEqual({ autoplayNext: false, skipSeconds: 10, volume: 0.4 });
   });
 
   it("preserves other preference fields when saving playback settings", () => {
     db.update(users).set({ preferences: { theme: "dark" } }).where(eq(users.id, userId)).run();
-    service.saveSettings(userId, { autoplayNext: false, skipSeconds: 10 });
+    service.saveSettings(userId, { autoplayNext: false, skipSeconds: 10, volume: 0.4 });
     const row = db.select().from(users).where(eq(users.id, userId)).get();
-    expect(row!.preferences).toEqual({ theme: "dark", playback: { autoplayNext: false, skipSeconds: 10 } });
+    expect(row!.preferences).toEqual({
+      theme: "dark",
+      playback: { autoplayNext: false, skipSeconds: 10, volume: 0.4 },
+    });
   });
 
   it("falls back to defaults for malformed stored values", () => {
     db.update(users)
-      .set({ preferences: { playback: { autoplayNext: "yes", skipSeconds: -3 } } })
+      .set({ preferences: { playback: { autoplayNext: "yes", skipSeconds: -3, volume: 7 } } })
       .where(eq(users.id, userId))
       .run();
     expect(service.getSettings(userId)).toEqual(DEFAULT_PLAYBACK_SETTINGS);

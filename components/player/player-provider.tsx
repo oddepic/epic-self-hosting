@@ -3,8 +3,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, Volume1, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, SkipForward, Volume1, Volume2, VolumeX, X } from "lucide-react";
 import { usePlayerEngine, type PlaybackStart, type PlayerState } from "./use-player-engine";
+import { activeSkipSegment } from "@/lib/player/skip-segments";
 
 export interface PlayerContextValue {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -55,6 +56,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const [skipSeconds, setSkipSeconds] = useState(5);
   const [autoplayNext, setAutoplayNext] = useState(true);
+  const [volume, setVolume] = useState(1);
 
   useEffect(() => {
     void fetch("/api/settings/playback")
@@ -63,14 +65,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (!b) return;
         setSkipSeconds(typeof b.skipSeconds === "number" ? b.skipSeconds : 5);
         setAutoplayNext(typeof b.autoplayNext === "boolean" ? b.autoplayNext : true);
+        setVolume(typeof b.volume === "number" ? b.volume : 1);
       })
       .catch(() => {});
   }, [pathname]);
 
   const onAutoAdvance = useMemo(
-    () => (episodeId: number) => {
-      if (!autoplayNext) return;
+    () => (episodeId: number): boolean => {
+      if (!autoplayNext) return false;
       router.replace(`/watch/${episodeId}`);
+      return true;
     },
     [router, autoplayNext],
   );
@@ -91,11 +95,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [dragFraction, setDragFraction] = useState<number | null>(null);
-  const [volume, setVolume] = useState(1);
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
   const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controlsHoveredRef = useRef(false);
+  const saveVolumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep the always-mounted <video> element's volume in sync with the state
+  // (covers both the initial load of the persisted value and slider changes).
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.volume = volume;
+  }, [volume]);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -135,6 +145,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         ? state.positionSeconds / state.durationSeconds
         : 0;
 
+  // Skip Intro / Skip Ending: while the playhead is inside a detected segment
+  // window (Intro Skipper plugin), offer a one-click jump to the segment end.
+  const skipTarget = useMemo(
+    () => activeSkipSegment(state.session?.skipSegments, state.positionSeconds),
+    [state.session?.skipSegments, state.positionSeconds],
+  );
+
+  // Continue to EP X: when the episode ends and autoplay-next is off, offer a
+  // manual jump to the next episode instead of auto-advancing.
+  const continueEpisode = useMemo(() => {
+    if (autoplayNext || !state.ended) return null;
+    const session = state.session;
+    if (session?.nextEpisodeId == null) return null;
+    return { episodeId: session.nextEpisodeId, episodeNumber: session.nextEpisodeNumber };
+  }, [autoplayNext, state.ended, state.session]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -146,6 +172,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const video = videoRef.current;
     setVolume(level);
     if (video) video.volume = level;
+    // Persist the volume, debounced so dragging the slider doesn't spam.
+    if (saveVolumeTimerRef.current != null) clearTimeout(saveVolumeTimerRef.current);
+    saveVolumeTimerRef.current = setTimeout(() => {
+      void fetch("/api/settings/playback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ volume: level }),
+      }).catch(() => {});
+    }, 300);
   }, []);
 
   const onPickAudio = useCallback(
@@ -342,6 +377,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 }}
                 aria-label={`Status: ${state.status}`}
               />
+            </div>
+          )}
+
+          {mode === "big" && skipTarget && (
+            <div className="absolute bottom-24 right-6">
+              <button
+                onClick={() => {
+                  const video = videoRef.current;
+                  if (video && Number.isFinite(video.duration)) {
+                    // A plain seek: the engine's `seeked` listener reports it
+                    // through the normal save cycle; nothing marks the episode
+                    // watched.
+                    video.currentTime = skipTarget.end;
+                  }
+                  showControls();
+                }}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
+              >
+                <SkipForward className="mr-1.5 inline h-4 w-4" aria-hidden />
+                {skipTarget.kind === "intro" ? "Skip Intro" : "Skip Ending"}
+              </button>
+            </div>
+          )}
+
+          {mode === "big" && continueEpisode && (
+            <div className="absolute bottom-24 right-6">
+              <button
+                onClick={() => router.replace(`/watch/${continueEpisode.episodeId}`)}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
+              >
+                <SkipForward className="mr-1.5 inline h-4 w-4" aria-hidden />
+                {continueEpisode.episodeNumber != null
+                  ? `Continue to EP ${continueEpisode.episodeNumber}`
+                  : "Continue to next episode"}
+              </button>
             </div>
           )}
 

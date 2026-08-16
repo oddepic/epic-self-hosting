@@ -5,11 +5,13 @@ import { users } from "../db/schema";
 export interface PlaybackSettings {
   autoplayNext: boolean;
   skipSeconds: number;
+  volume: number;
 }
 
 export const DEFAULT_PLAYBACK_SETTINGS: PlaybackSettings = {
   autoplayNext: true,
   skipSeconds: 5,
+  volume: 1,
 };
 
 export class PlaybackSettingsService {
@@ -41,6 +43,10 @@ export class PlaybackSettingsService {
         typeof p.skipSeconds === "number" && Number.isFinite(p.skipSeconds) && p.skipSeconds > 0
           ? p.skipSeconds
           : DEFAULT_PLAYBACK_SETTINGS.skipSeconds,
+      volume:
+        typeof p.volume === "number" && Number.isFinite(p.volume) && p.volume >= 0 && p.volume <= 1
+          ? p.volume
+          : DEFAULT_PLAYBACK_SETTINGS.volume,
     };
   }
 }
