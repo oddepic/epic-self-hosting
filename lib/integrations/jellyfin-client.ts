@@ -281,6 +281,35 @@ export class JellyfinSdkClient implements JellyfinClient {
     }
   }
 
+  // The Intro Skipper plugin's "Detect and Analyze Media Segments" scheduled
+  // task id. Its automatic trigger is disabled (it looped forever on
+  // invalid-SeasonId episodes and crashed Jellyfin); the app runs it once per
+  // newly downloaded episode instead.
+  async getIntroAnalysisTaskId(): Promise<string | null> {
+    const tasks = await this.request<{ Id: string; Key?: string }[]>("/ScheduledTasks");
+    return tasks.find((t) => t.Key === "IntroSkipperDetectSegmentsTask")?.Id ?? null;
+  }
+
+  // Whether the Intro Skipper plugin is currently running a scan. Treats a
+  // missing plugin / unknown endpoint as busy, so callers skip triggering.
+  async getIntroScanStatus(): Promise<boolean> {
+    try {
+      const body = await this.request<{ isRunning?: boolean }>("/Intros/ScanStatus");
+      return body.isRunning === true;
+    } catch {
+      return true;
+    }
+  }
+
+  // Run a scheduled task once (same as the play button in the dashboard).
+  async runScheduledTask(taskId: string): Promise<boolean> {
+    const response = await fetch(`${this.api.basePath}/ScheduledTasks/Running/${taskId}`, {
+      method: "POST",
+      headers: { "X-Emby-Token": this.apiKey },
+    });
+    return response.ok;
+  }
+
   private async withFreshAuth<T>(
     token: string,
     fn: (freshToken: string) => Promise<T>,

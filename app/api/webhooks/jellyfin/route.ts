@@ -3,6 +3,8 @@ import { createDb } from "@/lib/db/client";
 import { loadConfig } from "@/lib/config";
 import { UserService } from "@/lib/services/user-service";
 import { WebhookService } from "@/lib/services/webhook-service";
+import { IntroAnalysisService } from "@/lib/services/intro-analysis-service";
+import { JellyfinSdkClient } from "@/lib/integrations/jellyfin-client";
 import { createMalSync } from "@/lib/services/mal-sync-service";
 import { publish } from "@/lib/events/bus";
 import type { JellyfinWebhookPayload } from "@/lib/integrations/types";
@@ -34,6 +36,19 @@ export async function POST(request: NextRequest) {
   const { completedEpisodeIds, statusChangedAnimeIds } = service.handleEvent(payload);
   if (payload.NotificationType === "ItemAdded") {
     publish("availability-updated", { reason: "webhook-item-added" });
+    // A newly downloaded episode: if it has no intro/credits segments yet,
+    // run ONE bounded Intro Skipper scan of its season (the plugin's own
+    // endless scheduled analysis was crashing Jellyfin and is disabled).
+    if (payload.ItemType === "Episode" && payload.ItemId) {
+      const jellyfin = new JellyfinSdkClient(
+        config.jellyfinUrl,
+        config.jellyfinApiKey,
+        { name: "epic self-hosting", version: "0.1.0" },
+        { name: "server", id: "epic-self-hosting-webhook" },
+      );
+      const introAnalysis = new IntroAnalysisService(db, jellyfin, config.jellyfinApiKey);
+      void introAnalysis.maybeTriggerForEpisode(payload.ItemId).catch(() => {});
+    }
   }
   const malSync = createMalSync(db, config);
   for (const animeId of statusChangedAnimeIds) {

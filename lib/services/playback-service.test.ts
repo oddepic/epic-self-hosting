@@ -91,6 +91,15 @@ function fakeJellyfin(): JellyfinClient & {
     async getIntroSkipperSegments(): Promise<JellyfinSkipSegments> {
       return { intro: null, credits: null };
     },
+    async getIntroAnalysisTaskId() {
+      return null;
+    },
+    async getIntroScanStatus() {
+      return true;
+    },
+    async runScheduledTask() {
+      return false;
+    },
     async requestPlayback() {},
     async deleteItem() {},
     async refreshLibrary() {},

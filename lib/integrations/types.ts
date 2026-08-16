@@ -184,6 +184,9 @@ export interface JellyfinClient {
   authenticateUserByName(username: string, password: string): Promise<JellyfinAuth>;
   getPlaybackInfo(itemId: string, userId: string, accessToken: string, startPositionTicks: number, audioStreamIndex?: number, subtitleStreamIndex?: number): Promise<JellyfinPlaybackInfo>;
   getIntroSkipperSegments(itemId: string, accessToken: string): Promise<JellyfinSkipSegments>;
+  getIntroAnalysisTaskId(): Promise<string | null>;
+  getIntroScanStatus(): Promise<boolean>;
+  runScheduledTask(taskId: string): Promise<boolean>;
   requestPlayback(sessionId: string, itemId: string, startPositionTicks?: number): Promise<void>;
   deleteItem(id: string): Promise<void>;
   refreshLibrary(): Promise<void>;

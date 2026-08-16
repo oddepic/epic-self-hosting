@@ -115,6 +115,15 @@ function fakeJellyfin(): JellyfinClient & { deleted: string[]; refreshed: number
     async getIntroSkipperSegments() {
       return { intro: null, credits: null };
     },
+    async getIntroAnalysisTaskId() {
+      return null;
+    },
+    async getIntroScanStatus() {
+      return true;
+    },
+    async runScheduledTask() {
+      return false;
+    },
     async requestPlayback() {},
     async deleteItem(id: string) {
       state.deleted.push(id);

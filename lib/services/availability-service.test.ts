@@ -156,6 +156,15 @@ function fakeJellyfin(behavior: {
     async getIntroSkipperSegments() {
       return { intro: null, credits: null };
     },
+    async getIntroAnalysisTaskId() {
+      return null;
+    },
+    async getIntroScanStatus() {
+      return true;
+    },
+    async runScheduledTask() {
+      return false;
+    },
     async requestPlayback() {},
     async deleteItem() {},
     async refreshLibrary() {
