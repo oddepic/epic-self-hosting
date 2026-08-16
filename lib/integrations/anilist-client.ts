@@ -3,6 +3,27 @@ import { RateLimitedError } from "./errors";
 
 const ANILIST_ENDPOINT = "https://graphql.anilist.co";
 
+// Run a list of async tasks with a bounded concurrency, preserving order.
+// AniList's rate limit (90 req/min) tolerates a few in-flight requests, and
+// batching beats waiting for each page sequentially (e.g. a 600-entry MAL
+// import goes from 12 serial calls to ~4 waves of 3).
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 const MEDIA_FIELDS = `
   id
   idMal
@@ -65,9 +86,11 @@ export class AniListHttpClient implements AniListClient {
   }
 
   async getByMalIds(ids: number[]): Promise<AniListItem[]> {
-    const result: AniListItem[] = [];
+    const chunks: number[][] = [];
     for (let i = 0; i < ids.length; i += 50) {
-      const chunk = ids.slice(i, i + 50);
+      chunks.push(ids.slice(i, i + 50));
+    }
+    const results = await mapWithConcurrency(chunks, 3, async (chunk) => {
       const body = await this.post<AnilistResponse>(
         `
           query AnimeByMalIds($ids: [Int]) {
@@ -80,15 +103,17 @@ export class AniListHttpClient implements AniListClient {
         `,
         { ids: chunk },
       );
-      result.push(...(body.data?.Page?.media ?? []).map(mapMedia));
-    }
-    return result;
+      return (body.data?.Page?.media ?? []).map(mapMedia);
+    });
+    return results.flat();
   }
 
   async getAiringSchedule(ids: number[]): Promise<{ anilistId: number; airingAt: number | null; episode: number | null }[]> {
-    const result: { anilistId: number; airingAt: number | null; episode: number | null }[] = [];
+    const chunks: number[][] = [];
     for (let i = 0; i < ids.length; i += 50) {
-      const chunk = ids.slice(i, i + 50);
+      chunks.push(ids.slice(i, i + 50));
+    }
+    const results = await mapWithConcurrency(chunks, 3, async (chunk) => {
       const body = await this.post<{
         data?: { Page?: { media?: { id: number; nextAiringEpisode: { airingAt: number; episode: number } | null }[] } };
         errors?: { message: string }[];
@@ -105,15 +130,13 @@ export class AniListHttpClient implements AniListClient {
         `,
         { ids: chunk },
       );
-      for (const media of body.data?.Page?.media ?? []) {
-        result.push({
-          anilistId: media.id,
-          airingAt: media.nextAiringEpisode?.airingAt ?? null,
-          episode: media.nextAiringEpisode?.episode ?? null,
-        });
-      }
-    }
-    return result;
+      return (body.data?.Page?.media ?? []).map((media) => ({
+        anilistId: media.id,
+        airingAt: media.nextAiringEpisode?.airingAt ?? null,
+        episode: media.nextAiringEpisode?.episode ?? null,
+      }));
+    });
+    return results.flat();
   }
 
   private async mediaBy(field: "id" | "idMal", value: number): Promise<AniListItem | null> {
