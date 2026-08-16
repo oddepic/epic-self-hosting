@@ -133,6 +133,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     ? `${state.session.animeTitle ?? "Anime"} · S${String(state.session.seasonNumber).padStart(2, "0")}E${String(state.session.episodeNumber).padStart(2, "0")}`
     : null;
 
+  const episodeLabel = state.session
+    ? `S${String(state.session.seasonNumber).padStart(2, "0")} · E${String(state.session.episodeNumber).padStart(2, "0")}`
+    : null;
+
   const progress =
     state.durationSeconds && state.durationSeconds > 0
       ? (state.positionSeconds / state.durationSeconds) * 100
@@ -238,6 +242,37 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const rect = barRef.current?.getBoundingClientRect();
     if (!rect || rect.width === 0) return 0;
     return clamp((clientX - rect.left) / rect.width, 0, 1);
+  }, []);
+
+  const volumeBarRef = useRef<HTMLDivElement | null>(null);
+  const volumeDragRef = useRef(false);
+
+  const volumeFractionFromEvent = useCallback((clientX: number): number => {
+    const rect = volumeBarRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return 0;
+    return clamp((clientX - rect.left) / rect.width, 0, 1);
+  }, []);
+
+  const onVolumePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      volumeDragRef.current = true;
+      setVolumeLevel(volumeFractionFromEvent(e.clientX));
+    },
+    [volumeFractionFromEvent, setVolumeLevel],
+  );
+
+  const onVolumePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!volumeDragRef.current) return;
+      setVolumeLevel(volumeFractionFromEvent(e.clientX));
+    },
+    [volumeFractionFromEvent, setVolumeLevel],
+  );
+
+  const onVolumePointerUp = useCallback(() => {
+    volumeDragRef.current = false;
   }, []);
 
   const onBarPointerDown = useCallback(
@@ -461,7 +496,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 </div>
               </div>
 
-              <div className="mt-1 flex items-center gap-1">
+              <div className="relative mt-1 flex items-center gap-1">
                 <button
                   onClick={() => skip(-skipSeconds)}
                   aria-label={`Back ${skipSeconds} seconds`}
@@ -490,23 +525,40 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                   <span className="sr-only">Forward {skipSeconds} seconds</span>
                 </button>
 
-                <span className="ml-2 font-mono text-xs text-text-secondary">
-                  {formatPosition(state.positionSeconds)}
-                  {state.durationSeconds ? ` / ${formatPosition(state.durationSeconds)}` : ""}
-                </span>
+                {episodeLabel && (
+                  <div className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 -translate-y-0.5 flex-col items-center gap-0.5">
+                    <span className="font-mono text-xs text-text-primary">{episodeLabel}</span>
+                    <span className="font-mono text-xs text-text-secondary">
+                      {formatPosition(state.positionSeconds)}
+                      {state.durationSeconds ? ` / ${formatPosition(state.durationSeconds)}` : ""}
+                    </span>
+                  </div>
+                )}
 
                 <div className="ml-auto flex items-center gap-1">
                   <div className="group flex items-center">
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={volume}
-                      onChange={(e) => setVolumeLevel(Number(e.target.value))}
+                    <div
+                      ref={volumeBarRef}
+                      role="slider"
                       aria-label="Volume"
-                      className="w-0 origin-right scale-x-0 opacity-0 transition-all duration-150 group-hover:mr-1 group-hover:w-20 group-hover:scale-x-100 group-hover:opacity-100 accent-accent"
-                    />
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(volume * 100)}
+                      className="relative h-5 w-0 origin-right scale-x-0 cursor-pointer touch-none opacity-0 transition-all duration-150 group-hover:mr-1 group-hover:w-20 group-hover:scale-x-100 group-hover:opacity-100"
+                      onPointerDown={onVolumePointerDown}
+                      onPointerMove={onVolumePointerMove}
+                      onPointerUp={onVolumePointerUp}
+                    >
+                      <div className="absolute top-1/2 h-1 w-full -translate-y-1/2 rounded-full bg-surface-raised" />
+                      <div
+                        className="peer/volthumb absolute top-1/2 z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent transition-colors hover:bg-accent-hover active:bg-accent"
+                        style={{ left: `${volume * 100}%` }}
+                      />
+                      <div
+                        className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-accent transition-colors peer-hover/volthumb:bg-accent-hover"
+                        style={{ width: `${volume * 100}%` }}
+                      />
+                    </div>
                     <button
                       onClick={() => setVolumeLevel(volume > 0 ? 0 : 1)}
                       aria-label={volume > 0 ? "Mute" : "Unmute"}
