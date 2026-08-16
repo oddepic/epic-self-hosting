@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, CheckCheck, Play, X } from "lucide-react";
 import Button from "@/components/ui/button";
@@ -58,7 +58,18 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   const router = useRouter();
   const [now] = useState(() => Date.now());
   const [detail, setDetail] = useState<AnimeDetail | null>(null);
-  const [season, setSeason] = useState<number | undefined>(undefined);
+  // Start from the persisted season (if any) so the very first fetch already
+  // targets the right season instead of flashing the default one.
+  const [season, setSeason] = useState<number | undefined>(() => {
+    if (animeId == null) return undefined;
+    try {
+      const saved = localStorage.getItem(`epic-modal-season:${animeId}`);
+      return saved != null && saved !== "" ? Number(saved) : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const loadGenerationRef = useRef(0);
   const [changingStatus, setChangingStatus] = useState(false);
   const [addState, setAddState] = useState<{
     phase: "checking" | "confirm" | "added";
@@ -70,11 +81,17 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
 
   const load = useCallback(async () => {
     if (animeId == null) return;
+    // A season restore can fire a second fetch before the first resolves;
+    // discard responses from superseded requests so the default-season
+    // payload can never overwrite the restored season's episodes.
+    const generation = ++loadGenerationRef.current;
     const res = await fetch(
       `/api/library/detail?animeId=${animeId}${season != null ? `&season=${season}` : ""}`,
     );
+    if (generation !== loadGenerationRef.current) return;
     if (res.ok) {
       const body = (await res.json()) as { detail: AnimeDetail };
+      if (generation !== loadGenerationRef.current) return;
       setDetail(body.detail);
     }
   }, [animeId, season]);
@@ -83,9 +100,8 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     if (animeId != null) void load();
   }, [load, animeId]);
 
-  // Restore the last season this user viewed for this anime (persisted per
-  // anime in localStorage); the default (resume/first season) applies when
-  // nothing was saved.
+  // The lazy initializer only covers the first mount; when the modal switches
+  // to a different anime while mounted, restore that anime's persisted season.
   useEffect(() => {
     if (animeId == null) return;
     try {
