@@ -318,20 +318,6 @@ export class JellyfinSdkClient implements JellyfinClient {
     }));
   }
 
-  async listAllItemIds(): Promise<string[]> {
-    const ids: string[] = [];
-    const pageSize = 500;
-    for (let start = 0; ; start += pageSize) {
-      const body = await this.request<{ Items: JellyfinItemDto[]; TotalRecordCount?: number }>(
-        `/Items?Recursive=true&Limit=${pageSize}&StartIndex=${start}`,
-      );
-      const items = body.Items ?? [];
-      ids.push(...items.map((item) => item.Id));
-      if (ids.length >= (body.TotalRecordCount ?? 0)) break;
-    }
-    return ids;
-  }
-
   async deleteItem(id: string): Promise<void> {
     await this.request(`/Items/${id}`, { method: "DELETE" });
   }

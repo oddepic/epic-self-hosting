@@ -157,9 +157,6 @@ function fakeJellyfin(behavior: {
       return { intro: null, credits: null };
     },
     async requestPlayback() {},
-    async listAllItemIds() {
-      return [];
-    },
     async deleteItem() {},
     async refreshLibrary() {
       this.rebuildCalls.push(Date.now());

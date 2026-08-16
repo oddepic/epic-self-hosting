@@ -23,6 +23,10 @@ export interface ResetResult {
   files: { success: boolean; empty: boolean };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Remove the contents of a directory but keep the directory itself.
  * The directory is recreated if it does not exist.
@@ -42,9 +46,12 @@ export class ResetService {
     private readonly jellyfin: JellyfinClient,
     private readonly sonarr: SonarrClient,
     private readonly rootFolder?: string,
+    private readonly options: { settleDelayMs?: number } = {},
   ) {}
 
   async reset(): Promise<ResetResult> {
+    const settleDelayMs = this.options.settleDelayMs ?? 250;
+
     const sonarr = { success: true, seriesDeleted: 0 };
     try {
       const series = await this.sonarr.getSeries();
@@ -62,6 +69,28 @@ export class ResetService {
       sonarr.success = false;
     }
 
+    // Delete only the TOP-LEVEL series in Jellyfin (their episodes and
+    // seasons cascade). Rapidly deleting every item one-by-one while the
+    // file watcher churns has repeatedly crashed Jellyfin 10.11.11 with a
+    // native stack overflow (0xc00000fd) — keep this part small and spaced.
+    const jellyfin = { success: true, itemsDeleted: 0 };
+    try {
+      const jellyfinSeries = await this.jellyfin.getSeries();
+      jellyfin.itemsDeleted = jellyfinSeries.length;
+      for (const s of jellyfinSeries) {
+        try {
+          await this.jellyfin.deleteItem(s.id);
+        } catch {
+          // Best-effort; the library refresh cleans up stragglers.
+        }
+        if (settleDelayMs > 0) await sleep(settleDelayMs);
+      }
+    } catch {
+      jellyfin.success = false;
+    }
+
+    // Empty the media folder AFTER the items are gone: the library watcher
+    // then has nothing left to reconcile for each deleted file.
     const files = { success: true, empty: false };
     if (this.rootFolder) {
       try {
@@ -72,17 +101,8 @@ export class ResetService {
       }
     }
 
-    const jellyfin = { success: true, itemsDeleted: 0 };
     try {
-      const itemIds = await this.jellyfin.listAllItemIds();
-      jellyfin.itemsDeleted = itemIds.length;
-      for (const id of itemIds) {
-        try {
-          await this.jellyfin.deleteItem(id);
-        } catch {
-          // Best-effort; the library refresh cleans up stragglers.
-        }
-      }
+      if (settleDelayMs > 0) await sleep(settleDelayMs);
       await this.jellyfin.refreshLibrary();
     } catch {
       jellyfin.success = false;

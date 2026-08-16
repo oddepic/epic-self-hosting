@@ -185,7 +185,6 @@ export interface JellyfinClient {
   getPlaybackInfo(itemId: string, userId: string, accessToken: string, startPositionTicks: number, audioStreamIndex?: number, subtitleStreamIndex?: number): Promise<JellyfinPlaybackInfo>;
   getIntroSkipperSegments(itemId: string, accessToken: string): Promise<JellyfinSkipSegments>;
   requestPlayback(sessionId: string, itemId: string, startPositionTicks?: number): Promise<void>;
-  listAllItemIds(): Promise<string[]>;
   deleteItem(id: string): Promise<void>;
   refreshLibrary(): Promise<void>;
 }

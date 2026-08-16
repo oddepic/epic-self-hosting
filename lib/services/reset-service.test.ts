@@ -89,7 +89,10 @@ function fakeJellyfin(): JellyfinClient & { deleted: string[]; refreshed: number
       return state.refreshed;
     },
     async getSeries() {
-      return [];
+      return [
+        { id: "jf-s1", tvdbId: 1, title: "Any Anime" },
+        { id: "jf-s2", tvdbId: 2, title: "Another Anime" },
+      ];
     },
     async getEpisodes() {
       return [];
@@ -113,9 +116,6 @@ function fakeJellyfin(): JellyfinClient & { deleted: string[]; refreshed: number
       return { intro: null, credits: null };
     },
     async requestPlayback() {},
-    async listAllItemIds() {
-      return ["a", "b", "c"];
-    },
     async deleteItem(id: string) {
       state.deleted.push(id);
     },
@@ -139,7 +139,7 @@ describe("ResetService", () => {
   it("removes Sonarr series WITHOUT deleting files, empties the root folder (kept on disk), purges Jellyfin, and wipes the app tables", async () => {
     const sonarr = fakeSonarr();
     const jellyfin = fakeJellyfin();
-    const service = new ResetService(db, jellyfin, sonarr, "C:/reset-files");
+    const service = new ResetService(db, jellyfin, sonarr, "C:/reset-files", { settleDelayMs: 0 });
 
     const result = await service.reset();
 
@@ -150,11 +150,11 @@ describe("ResetService", () => {
       { id: 22, deleteFiles: false },
     ]);
     expect(result.files).toEqual({ success: true, empty: true });
-    expect(jellyfin.deleted).toEqual(["a", "b", "c"]);
+    expect(jellyfin.deleted).toEqual(["jf-s1", "jf-s2"]);
     expect(jellyfin.refreshed).toBe(1);
     expect(result).toEqual({
       sonarr: { success: true, seriesDeleted: 2 },
-      jellyfin: { success: true, itemsDeleted: 3 },
+      jellyfin: { success: true, itemsDeleted: 2 },
       db: { success: true, tables: expect.objectContaining({ users: 0, animes: 0, episodes: 0 }) },
       files: { success: true, empty: true },
     });
@@ -172,8 +172,8 @@ describe("ResetService", () => {
     const sonarr = fakeSonarr();
     sonarr.getSeries = async () => [];
     const jellyfin = fakeJellyfin();
-    jellyfin.listAllItemIds = async () => [];
-    const service = new ResetService(db, jellyfin, sonarr, "C:/does-not-exist-for-test");
+    jellyfin.getSeries = async () => [];
+    const service = new ResetService(db, jellyfin, sonarr, "C:/does-not-exist-for-test", { settleDelayMs: 0 });
 
     const result = await service.reset();
 
@@ -188,7 +188,7 @@ describe("ResetService", () => {
     sonarr.deleteSeries = async () => {
       throw new Error("Expected query to return 1 rows but returned 0");
     };
-    const service = new ResetService(db, fakeJellyfin(), sonarr, "C:/reset-files");
+    const service = new ResetService(db, fakeJellyfin(), sonarr, "C:/reset-files", { settleDelayMs: 0 });
 
     const result = await service.reset();
 
@@ -200,8 +200,8 @@ describe("ResetService", () => {
     const sonarr = fakeSonarr();
     sonarr.getSeries = async () => [];
     const jellyfin = fakeJellyfin();
-    jellyfin.listAllItemIds = async () => [];
-    const service = new ResetService(db, jellyfin, sonarr, "Z:/definitely-not-a-real-drive");
+    jellyfin.getSeries = async () => [];
+    const service = new ResetService(db, jellyfin, sonarr, "Z:/definitely-not-a-real-drive", { settleDelayMs: 0 });
 
     const result = await service.reset();
 

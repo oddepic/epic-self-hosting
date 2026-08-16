@@ -73,9 +73,6 @@ function fakeJellyfin(): JellyfinClient {
       return { intro: null, credits: null };
     },
     async requestPlayback() {},
-    async listAllItemIds() {
-      return [];
-    },
     async deleteItem() {},
     async refreshLibrary() {},
   };
