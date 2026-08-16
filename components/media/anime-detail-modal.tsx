@@ -83,6 +83,42 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     if (animeId != null) void load();
   }, [load, animeId]);
 
+  // Restore the last season this user viewed for this anime (persisted per
+  // anime in localStorage); the default (resume/first season) applies when
+  // nothing was saved.
+  useEffect(() => {
+    if (animeId == null) return;
+    try {
+      const saved = localStorage.getItem(`epic-modal-season:${animeId}`);
+      setSeason(saved != null && saved !== "" ? Number(saved) : undefined);
+    } catch {
+      setSeason(undefined);
+    }
+  }, [animeId]);
+
+  // Drop a stale saved season (e.g. the season list changed) so the select
+  // falls back instead of showing a blank option.
+  useEffect(() => {
+    if (!detail || season == null) return;
+    if (!detail.seasons.some((s) => s.number === season)) {
+      setSeason(undefined);
+    }
+  }, [detail, season]);
+
+  const onPickSeason = useCallback(
+    (number: number) => {
+      setSeason(number);
+      if (animeId == null) return;
+      try {
+        localStorage.setItem(`epic-modal-season:${animeId}`, String(number));
+      } catch {
+        // Storage may be unavailable (private mode); the pick still applies
+        // for this session.
+      }
+    },
+    [animeId],
+  );
+
   const newAnime = animeId == null ? item : null;
   const anime = detail?.anime ?? null;
 
@@ -438,12 +474,12 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                 <select
                   name="season"
                   value={season ?? detail.resume?.seasonNumber ?? detail.seasons[0]!.number}
-                  onChange={(e) => setSeason(Number(e.target.value))}
+                  onChange={(e) => onPickSeason(Number(e.target.value))}
                   className="rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-sm text-text-primary"
                 >
                   {detail.seasons.map((s) => (
                     <option key={s.number} value={s.number}>
-                      Season {s.number} · {s.watchedCount}/{s.totalCount} watched
+                      Season {s.number} · {s.availableCount}/{s.totalCount} downloaded
                     </option>
                   ))}
                 </select>

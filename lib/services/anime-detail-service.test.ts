@@ -69,8 +69,8 @@ describe("AnimeDetailService.getDetail", () => {
 
     expect(detail.anime.id).toBe(animeId);
     expect(detail.seasons).toEqual([
-      { number: 1, watchedCount: 2, totalCount: 3 },
-      { number: 2, watchedCount: 0, totalCount: 2 },
+      { number: 1, watchedCount: 2, totalCount: 3, availableCount: 3 },
+      { number: 2, watchedCount: 0, totalCount: 2, availableCount: 2 },
     ]);
     expect(detail.episodes).toHaveLength(2);
     expect(detail.episodes[0]).toMatchObject({ episodeNumber: 1, title: "Episode 1" });

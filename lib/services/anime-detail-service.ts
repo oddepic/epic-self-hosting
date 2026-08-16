@@ -6,6 +6,7 @@ export interface SeasonSummary {
   number: number;
   watchedCount: number;
   totalCount: number;
+  availableCount: number;
 }
 
 export interface EpisodeRow {
@@ -53,6 +54,7 @@ export class AnimeDetailService {
       number: season.number,
       watchedCount: this.countEpisodes(season.id, true),
       totalCount: this.countEpisodes(season.id, false),
+      availableCount: this.countAvailable(season.id),
     }));
 
     const resume = this.findFirstResumable(animeId);
@@ -119,6 +121,16 @@ export class AnimeDetailService {
         .select({ count: sql<number>`count(*)` })
         .from(episodes)
         .where(condition)
+        .get()?.count ?? 0
+    );
+  }
+
+  private countAvailable(seasonId: number): number {
+    return (
+      this.db
+        .select({ count: sql<number>`count(*)` })
+        .from(episodes)
+        .where(and(eq(episodes.seasonId, seasonId), eq(episodes.available, true)))
         .get()?.count ?? 0
     );
   }
