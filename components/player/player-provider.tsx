@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, SkipForward, Volume1, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward, Volume1, Volume2, VolumeX, X } from "lucide-react";
 import { usePlayerEngine, type PlaybackStart, type PlayerState } from "./use-player-engine";
 import { activeSkipSegment } from "@/lib/player/skip-segments";
 
@@ -49,6 +49,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenRef = useRef<HTMLDivElement | null>(null);
   const pendingSkipRef = useRef(0);
   const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -91,6 +92,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     () => ({ videoRef, state, play, close, setAudio, setSubtitle, session: state.session, mode }),
     [videoRef, state, play, close, setAudio, setSubtitle, mode],
   );
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === fullscreenRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // Escape is handled by the browser; this just leaves fullscreen when the
+  // player shrinks out of big mode (back to home) so the mini card is not
+  // stuck inside a fullscreened element.
+  useEffect(() => {
+    if (mode !== "big" && isFullscreen) {
+      void document.exitFullscreen().catch(() => {});
+    }
+  }, [mode, isFullscreen]);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement === fullscreenRef.current) {
+      void document.exitFullscreen().catch(() => {});
+    } else {
+      void fullscreenRef.current?.requestFullscreen().catch(() => {});
+    }
+  }, []);
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [dragging, setDragging] = useState(false);
@@ -322,11 +348,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       } else if (e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
         togglePlay();
+      } else if (e.key === "Escape" && !document.fullscreenElement) {
+        // In fullscreen the browser owns Escape (exits fullscreen); outside
+        // it, Escape does the same as the back arrow: back to home.
+        e.preventDefault();
+        router.push("/");
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, skip, togglePlay, skipSeconds]);
+  }, [mode, skip, togglePlay, skipSeconds, router]);
 
   return (
     <PlayerContext.Provider value={value}>
@@ -334,6 +365,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
       {/* One <video>, always mounted. Only its wrapper's layout changes. */}
       <div
+        ref={fullscreenRef}
         className={
           mode === "hidden"
             ? "hidden"
@@ -645,12 +677,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 
                   <button
-                    onClick={() => router.push("/")}
-                    aria-label="Minimize player"
+                    onClick={toggleFullscreen}
+                    aria-label={isFullscreen ? "Exit full screen" : "Full screen"}
                     className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                   >
-                    <Minimize2 className="h-5 w-5" aria-hidden />
-                    <span className="sr-only">Minimize player</span>
+                    {isFullscreen ? (
+                      <Minimize className="h-5 w-5" aria-hidden />
+                    ) : (
+                      <Maximize className="h-5 w-5" aria-hidden />
+                    )}
+                    <span className="sr-only">
+                      {isFullscreen ? "Exit full screen" : "Full screen"}
+                    </span>
                   </button>
                 </div>
               </div>
