@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb, type Db } from "../db/client";
 import { animes, seasons, episodes } from "../db/schema";
-import { AvailabilityService } from "./availability-service";
+import { AvailabilityService, sanitizeEpisodeTitle } from "./availability-service";
 import type { JellyfinEpisodeItem, JellyfinSeriesItem, SonarrClient, SonarrSeries } from "../integrations/types";
 
 function fakeSonarr(behavior: {
@@ -423,6 +423,79 @@ describe("AvailabilityService.sync", () => {
     expect(jellyfin.rebuildCalls).toHaveLength(0);
     expect(result.jellyfinRebuilt).toBeUndefined();
     expect(result.seriesMatched).toBe(1);
+  });
+
+  it("stores real Jellyfin episode names and drops fallback junk", async () => {
+    const { seasonId } = seedAnime(db);
+    const ep2 = db
+      .insert(episodes)
+      .values({ seasonId, episodeNumber: 2, progressSeconds: 0 })
+      .returning()
+      .get();
+    db.insert(episodes).values({ seasonId, episodeNumber: 3, progressSeconds: 0 }).run();
+    // Pre-existing junk must be cleaned when Jellyfin still returns junk.
+    db.update(episodes).set({ title: "Frieren: Beyond Journey's End" }).where(eq(episodes.id, ep2.id)).run();
+
+    const jellyfin = fakeJellyfin({
+      series: [makeSeries()],
+      episodes: [
+        makeEpisodeItem({ name: "The Journey's End" }),
+        makeEpisodeItem({ id: "jf-ep-2", episodeNumber: 2, name: "Frieren: Beyond Journey's End" }),
+        makeEpisodeItem({ id: "jf-ep-3", episodeNumber: 3, name: "Episode 3" }),
+      ],
+    });
+    service = new AvailabilityService(db, jellyfin);
+    await service.sync();
+
+    const rows = db
+      .select()
+      .from(episodes)
+      .where(eq(episodes.seasonId, seasonId))
+      .orderBy(episodes.episodeNumber)
+      .all();
+    expect(rows[0]!.title).toBe("The Journey's End");
+    expect(rows[1]!.title).toBeNull();
+    expect(rows[2]!.title).toBeNull();
+  });
+
+  it("does not wipe an existing title when Jellyfin has no name", async () => {
+    const { episodeId } = seedAnime(db);
+    db.update(episodes).set({ title: "The Journey's End" }).where(eq(episodes.id, episodeId)).run();
+    service = new AvailabilityService(
+      db,
+      fakeJellyfin({ series: [makeSeries()], episodes: [makeEpisodeItem({ name: null })] }),
+    );
+    await service.sync();
+
+    const row = db.select().from(episodes).where(eq(episodes.id, episodeId)).get();
+    expect(row!.title).toBe("The Journey's End");
+  });
+});
+
+describe("sanitizeEpisodeTitle", () => {
+  it("keeps real episode titles", () => {
+    expect(sanitizeEpisodeTitle("The Journey's End", ["Foo", null])).toBe("The Journey's End");
+  });
+
+  it("drops the series name used as a fallback title", () => {
+    expect(sanitizeEpisodeTitle("Foo", ["Foo"])).toBeNull();
+    expect(sanitizeEpisodeTitle("  foo  ", ["Bar", "Foo"])).toBeNull();
+  });
+
+  it("drops episode-number fallbacks", () => {
+    expect(sanitizeEpisodeTitle("Episode 5", ["Foo"])).toBeNull();
+    expect(sanitizeEpisodeTitle("EP 5", ["Foo"])).toBeNull();
+    expect(sanitizeEpisodeTitle("5", ["Foo"])).toBeNull();
+    expect(sanitizeEpisodeTitle("Episode #4.8", ["Foo"])).toBeNull();
+  });
+
+  it("drops the series name even when punctuation differs", () => {
+    expect(sanitizeEpisodeTitle("Re ZERO Starting Life in Another World", ["Re:ZERO -Starting Life in Another World-"])).toBeNull();
+  });
+
+  it("drops empty and missing names", () => {
+    expect(sanitizeEpisodeTitle(null, ["Foo"])).toBeNull();
+    expect(sanitizeEpisodeTitle("   ", ["Foo"])).toBeNull();
   });
 });
 

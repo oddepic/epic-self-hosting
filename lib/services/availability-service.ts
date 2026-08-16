@@ -52,6 +52,37 @@ function matchSonarrSeries(anime: Anime, seriesList: SonarrSeries[]): SonarrSeri
   );
 }
 
+// Jellyfin fills missing episode metadata with fallback names — the series
+// title, "Episode N" / "Episode #S.E", or a bare number. Those are noise, not
+// titles: treat them as "no title" so the UI falls back to its own "EP N"
+// label instead of showing the anime's name or a meaningless number.
+function fuzzyTitle(title: string): string {
+  return normalizeTitle(title).replace(/[^a-z0-9]+/g, "");
+}
+
+export function sanitizeEpisodeTitle(
+  name: string | null | undefined,
+  seriesTitles: (string | null | undefined)[],
+): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const normalized = normalizeTitle(trimmed);
+  if (seriesTitles.some((t) => t != null && normalizeTitle(t) === normalized)) {
+    return null;
+  }
+  // Fallback names can differ from the series title only in punctuation
+  // ("Re ZERO Starting..." vs "Re:ZERO -Starting...-") — compare fuzzy too.
+  const fuzzy = fuzzyTitle(trimmed);
+  if (fuzzy !== "" && seriesTitles.some((t) => t != null && fuzzyTitle(t) === fuzzy)) {
+    return null;
+  }
+  if (/^episode\s+#?\d+(\.\d+)?$/i.test(trimmed)) return null;
+  if (/^ep\s*\d+$/i.test(trimmed)) return null;
+  if (/^\d+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
 export class AvailabilityService {
   constructor(
     private readonly db: Db,
@@ -177,8 +208,16 @@ export class AvailabilityService {
           if (episode.jellyfinItemId !== item.id) {
             changes.jellyfinItemId = item.id;
           }
-          if (item.name && episode.title !== item.name) {
-            changes.title = item.name;
+          if (item.name) {
+            const cleanTitle = sanitizeEpisodeTitle(item.name, [
+              matched.title,
+              anime.titleRomaji,
+              anime.titleEnglish,
+              anime.titleNative,
+            ]);
+            if (episode.title !== cleanTitle) {
+              changes.title = cleanTitle;
+            }
           }
           if (episode.thumbnailUrl !== item.thumbnailUrl) {
             changes.thumbnailUrl = item.thumbnailUrl;
