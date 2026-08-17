@@ -149,7 +149,7 @@ export default function AnimeView({
           <div className="mt-3 overflow-hidden rounded-xl border border-border">
             {upcoming.map((item, index) => (
               <div key={item.animeId} className={index > 0 ? "border-t border-border" : ""}>
-                <div className="flex items-baseline gap-3 px-4 py-2.5">
+                <div className="flex items-center gap-3 px-4 py-2.5">
                   <button
                     onClick={() => onOpenAnime(item.animeId)}
                     className="min-w-0 shrink-0 max-w-[60%] truncate text-left text-sm text-text-primary transition-colors hover:text-accent"
