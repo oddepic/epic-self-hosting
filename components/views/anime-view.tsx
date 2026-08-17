@@ -147,20 +147,20 @@ export default function AnimeView({
             Upcoming episodes
           </h3>
           <div className="mt-3 overflow-hidden rounded-xl border border-border">
-            {upcoming.map((item) => (
-              <button
-                key={item.animeId}
-                onClick={() => onOpenAnime(item.animeId)}
-                className="flex w-full items-baseline gap-3 border-b border-border px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-surface-hover"
-              >
-                <span className="truncate text-sm text-text-primary">
-                  {item.titleEnglish ?? item.titleRomaji}
-                </span>
-                <span className="mx-1 flex-1 border-b border-dotted border-text-muted/40" aria-hidden />
-                <span className="shrink-0 font-mono text-xs text-text-secondary">
-                  {formatAiringDate(item.nextEpisodeAt)}
-                </span>
-              </button>
+            {upcoming.map((item, index) => (
+              <div key={item.animeId} className={index > 0 ? "border-t border-border" : ""}>
+                <div className="flex items-baseline justify-between gap-4 px-4 py-2.5">
+                  <button
+                    onClick={() => onOpenAnime(item.animeId)}
+                    className="min-w-0 truncate text-left text-sm text-text-primary transition-colors hover:text-accent"
+                  >
+                    {item.titleEnglish ?? item.titleRomaji}
+                  </button>
+                  <span className="shrink-0 font-mono text-xs text-text-secondary">
+                    {formatAiringDate(item.nextEpisodeAt)}
+                  </span>
+                </div>
+              </div>
             ))}
           </div>
         </div>
