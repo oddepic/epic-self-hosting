@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { animes, episodes, seasons, type Anime } from "../db/schema";
 import type { JellyfinClient, JellyfinSeriesItem, SonarrClient, SonarrSeries } from "../integrations/types";
@@ -9,6 +9,10 @@ export interface SyncResult {
   episodesAvailable: number;
   progressUpdated: number;
   jellyfinRebuilt?: boolean;
+  // Episodes Sonarr has files for but the app still shows as unavailable —
+  // a sign Jellyfin's library index is stale (a file never got indexed).
+  // Callers can trigger a Jellyfin rescan and retry when this is non-zero.
+  missingFromJellyfin: number;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -94,7 +98,13 @@ export class AvailabilityService {
   ) {}
 
   async sync(): Promise<SyncResult> {
-    const result: SyncResult = { seriesMatched: 0, seriesLinked: 0, episodesAvailable: 0, progressUpdated: 0 };
+    const result: SyncResult = {
+      seriesMatched: 0,
+      seriesLinked: 0,
+      episodesAvailable: 0,
+      progressUpdated: 0,
+      missingFromJellyfin: 0,
+    };
 
     const animeRows = this.db.select().from(animes).all();
     const hasSonarrLinked = animeRows.some((anime) => anime.sonarrId != null);
@@ -279,6 +289,33 @@ export class AvailabilityService {
         }
       }
     }
+
+    // Detect stale Jellyfin indexes: episodes Sonarr has files for but which
+    // are still unavailable here. Jellyfin may have missed the file during a
+    // scan (as with the Re:ZERO S04E12 case) — a rescan + retry fixes it.
+    let missingFromJellyfin = 0;
+    for (const anime of animeRows) {
+      if (anime.sonarrId == null || !this.sonarr) continue;
+      try {
+        const files = (await this.sonarr.getEpisodeFiles(anime.sonarrId)) as {
+          episodes?: { id: number }[];
+        }[];
+        const fileEpisodeIds = new Set<number>();
+        for (const file of files) {
+          for (const ep of file.episodes ?? []) fileEpisodeIds.add(ep.id);
+        }
+        if (fileEpisodeIds.size === 0) continue;
+        const rows = this.db
+          .select({ available: episodes.available })
+          .from(episodes)
+          .where(inArray(episodes.sonarrEpisodeId, [...fileEpisodeIds]))
+          .all();
+        missingFromJellyfin += rows.filter((r) => !r.available).length;
+      } catch {
+        // Best-effort; a later sync retries.
+      }
+    }
+    result.missingFromJellyfin = missingFromJellyfin;
 
     return result;
   }

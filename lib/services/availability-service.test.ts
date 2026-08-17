@@ -335,7 +335,13 @@ describe("AvailabilityService.sync", () => {
     seedAnime(db, { tvdbId: 999_999 });
     service = new AvailabilityService(db, fakeJellyfin());
     const result = await service.sync();
-    expect(result).toEqual({ seriesMatched: 0, seriesLinked: 0, episodesAvailable: 0, progressUpdated: 0 });
+    expect(result).toEqual({
+      seriesMatched: 0,
+      seriesLinked: 0,
+      episodesAvailable: 0,
+      progressUpdated: 0,
+      missingFromJellyfin: 0,
+    });
   });
 
   it("links an orphaned anime to its Sonarr series by tvdb id", async () => {
@@ -537,6 +543,23 @@ describe("AvailabilityService.sync", () => {
 
     const row = db.select().from(episodes).where(eq(episodes.id, episodeId)).get();
     expect(row!.title).toBe("Stick Swinger");
+  });
+
+  it("reports episodes Sonarr has files for but the app cannot see", async () => {
+    const { animeId } = seedAnime(db, { sonarrId: 42 });
+    db.update(episodes).set({ sonarrEpisodeId: 101 }).run();
+    const sonarr = fakeSonarr();
+    sonarr.getEpisodeFiles = async () => [
+      { episodes: [{ id: 101 }, { id: 999 }] },
+      { episodes: [{ id: 102 }] },
+    ];
+    const jellyfin = fakeJellyfin();
+    service = new AvailabilityService(db, jellyfin, sonarr, { rebuildDelayMs: 0 });
+    const result = await service.sync();
+
+    // 101 exists as a row and is unavailable → missing; 102/999 have no row.
+    expect(result.missingFromJellyfin).toBe(1);
+    expect(animeId).toBeGreaterThan(0);
   });
 });
 

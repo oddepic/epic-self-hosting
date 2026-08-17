@@ -24,11 +24,26 @@ export async function POST() {
     const importsTriggered = await importService.importFiles(pending);
 
     const service = new AvailabilityService(db, jellyfin, sonarr);
-    const result = await service.sync();
+    let result = await service.sync();
+    let rescanTriggered = false;
+
+    // Jellyfin's index is stale when Sonarr has files the app can't see —
+    // rescan Jellyfin once and retry before giving up (e.g. a file Jellyfin
+    // skipped during an earlier scan).
+    if (result.missingFromJellyfin > 0) {
+      try {
+        await jellyfin.refreshLibrary();
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
+        result = await service.sync();
+        rescanTriggered = true;
+      } catch {
+        // Keep the first result; a later sync retries.
+      }
+    }
 
     publish("availability-updated", { reason: "library-sync" });
 
-    return NextResponse.json({ ...result, importsTriggered });
+    return NextResponse.json({ ...result, importsTriggered, rescanTriggered });
   } catch (error) {
     console.error("library sync failed:", error);
     return NextResponse.json(
