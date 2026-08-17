@@ -213,6 +213,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }, 300);
   }, []);
 
+  // Keep the pre-mute level in sync with whatever the user sets (slider,
+  // persisted load, restore itself).
+  useEffect(() => {
+    if (volume > 0) lastVolumeRef.current = volume;
+  }, [volume]);
+
+  const toggleMute = useCallback(() => {
+    setVolumeLevel(volume > 0 ? 0 : lastVolumeRef.current > 0 ? lastVolumeRef.current : 1);
+  }, [volume, setVolumeLevel]);
+
   const onPickAudio = useCallback(
     (index: number) => {
       setAudioMenuOpen(false);
@@ -272,6 +282,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const volumeBarRef = useRef<HTMLDivElement | null>(null);
   const volumeDragRef = useRef(false);
+  // Last non-zero volume, so unmuting restores the level instead of jumping
+  // to 100%. Synced from state so slider changes and the persisted load
+  // update it too.
+  const lastVolumeRef = useRef(1);
 
   const volumeFractionFromEvent = useCallback((clientX: number): number => {
     const rect = volumeBarRef.current?.getBoundingClientRect();
@@ -353,7 +367,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         toggleFullscreen();
       } else if (e.key === "m" || e.key === "M") {
         e.preventDefault();
-        setVolumeLevel(volume > 0 ? 0 : 1);
+        toggleMute();
       } else if (e.key === "Escape" && !document.fullscreenElement) {
         // In fullscreen the browser owns Escape (exits fullscreen); outside
         // it, Escape does the same as the back arrow: back to home.
@@ -363,7 +377,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, skip, togglePlay, skipSeconds, router, toggleFullscreen, setVolumeLevel, volume]);
+  }, [mode, skip, togglePlay, skipSeconds, router, toggleFullscreen, toggleMute]);
 
   return (
     <PlayerContext.Provider value={value}>
@@ -598,7 +612,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       />
                     </div>
                     <button
-                      onClick={() => setVolumeLevel(volume > 0 ? 0 : 1)}
+                      onClick={toggleMute}
                       aria-label={volume > 0 ? "Mute" : "Unmute"}
                       className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                     >
