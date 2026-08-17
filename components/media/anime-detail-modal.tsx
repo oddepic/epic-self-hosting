@@ -462,6 +462,7 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                       </option>
                     ))}
                   </select>
+                  <span className="text-text-muted/60" aria-hidden>|</span>
                   <select
                     name="score"
                     value={anime.score ?? 0}
@@ -477,37 +478,40 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                     ))}
                   </select>
                   {showProgress && seasonTotal > 0 && (
-                    <div className="flex items-center gap-1">
-                      <div className="relative">
-                        <input
-                          type="number"
-                          min={1}
-                          max={seasonTotal}
-                          value={progressInput}
-                          onChange={(e) => setProgressInput(e.target.value)}
-                          onBlur={(e) => void onCommitProgress(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              (e.target as HTMLInputElement).blur();
-                            }
-                          }}
-                          aria-label="Watched episodes"
-                          className="w-16 rounded-lg border border-border bg-surface-raised px-2 py-1.5 pr-7 font-mono text-xs text-text-primary"
-                        />
-                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center font-mono text-xs text-text-muted">
-                          / {seasonTotal}
-                        </span>
+                    <>
+                      <span className="text-text-muted/60" aria-hidden>|</span>
+                      <div className="flex items-center gap-1">
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min={1}
+                            max={seasonTotal}
+                            value={progressInput}
+                            onChange={(e) => setProgressInput(e.target.value)}
+                            onBlur={(e) => void onCommitProgress(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                (e.target as HTMLInputElement).blur();
+                              }
+                            }}
+                            aria-label="Watched episodes"
+                            className="w-24 rounded-lg border border-border bg-surface-raised px-2 py-1.5 pr-8 font-mono text-xs text-text-primary [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center font-mono text-xs text-text-muted">
+                            / {seasonTotal}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => void onMarkNext()}
+                          disabled={!nextUnwatched}
+                          title="Mark next episode watched"
+                          aria-label="Mark next episode watched"
+                          className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm leading-none text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          +
+                        </button>
                       </div>
-                      <button
-                        onClick={() => void onMarkNext()}
-                        disabled={!nextUnwatched}
-                        title="Mark next episode watched"
-                        aria-label="Mark next episode watched"
-                        className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm leading-none text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        +
-                      </button>
-                    </div>
+                    </>
                   )}
                 </>
               )}
