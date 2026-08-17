@@ -84,7 +84,9 @@ export default function AnimeView({
               onClick={() => router.push(`/watch/${hero.episodeId}`)}
             >
               <Play className="mr-2 inline h-4 w-4" fill="currentColor" strokeWidth={0} aria-hidden />
-              Resume EP {hero.episodeNumber}
+              {hero.progressSeconds > 0
+                ? `Resume EP ${hero.episodeNumber}`
+                : `Start EP ${hero.episodeNumber}`}
             </Button>
           </div>
         </div>

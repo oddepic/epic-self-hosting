@@ -137,6 +137,34 @@ describe("DashboardService", () => {
 
       expect(service.getContinueWatching()).toHaveLength(1);
     });
+
+    it("offers the next unwatched episode after finishing the previous one", () => {
+      const animeId = seedAnime(db, { lastWatchedAt: 800 });
+      seedEpisode(db, animeId, 1, 1, { watched: true, progressSeconds: 1420 });
+      seedEpisode(db, animeId, 1, 2, { progressSeconds: 0 });
+
+      const items = service.getContinueWatching();
+
+      expect(items).toHaveLength(1);
+      expect(items[0]!.episodeNumber).toBe(2);
+      expect(items[0]!.progressSeconds).toBe(0);
+    });
+
+    it("does not offer an episode that is not downloaded yet", () => {
+      const animeId = seedAnime(db, { lastWatchedAt: 800 });
+      seedEpisode(db, animeId, 1, 1, { watched: true, progressSeconds: 1420 });
+      seedEpisode(db, animeId, 1, 2, { available: false });
+
+      expect(service.getContinueWatching()).toHaveLength(0);
+    });
+
+    it("does not show a hero for a fully completed anime", () => {
+      const animeId = seedAnime(db, { lastWatchedAt: 800 });
+      seedEpisode(db, animeId, 1, 1, { watched: true, progressSeconds: 1420 });
+      seedEpisode(db, animeId, 1, 2, { watched: true, progressSeconds: 1420 });
+
+      expect(service.getContinueWatching()).toHaveLength(0);
+    });
   });
 
   describe("getWatching", () => {

@@ -63,40 +63,70 @@ export class DashboardService {
   }
 
   getContinueWatching(): ContinueWatchingItem[] {
-    return this.db
-      .select({
-        episodeId: episodes.id,
-        animeId: animes.id,
-        animeTitle: animes.titleEnglish ?? animes.titleRomaji,
-        coverImageUrl: animes.coverImageUrl,
-        jellyfinId: animes.jellyfinId,
-        seasonNumber: seasons.number,
-        episodeNumber: episodes.episodeNumber,
-        episodeTitle: episodes.title,
-        progressSeconds: episodes.progressSeconds,
-        durationSeconds: episodes.durationSeconds,
-      })
+    const base = {
+      episodeId: episodes.id,
+      animeId: animes.id,
+      animeTitle: animes.titleEnglish ?? animes.titleRomaji,
+      coverImageUrl: animes.coverImageUrl,
+      jellyfinId: animes.jellyfinId,
+      lastWatchedAt: animes.lastWatchedAt,
+      seasonNumber: seasons.number,
+      episodeNumber: episodes.episodeNumber,
+      episodeTitle: episodes.title,
+      progressSeconds: episodes.progressSeconds,
+      durationSeconds: episodes.durationSeconds,
+    } as const;
+
+    // In-progress episodes (resume candidates).
+    const resumeRows = this.db
+      .select(base)
       .from(episodes)
       .innerJoin(seasons, eq(seasons.id, episodes.seasonId))
       .innerJoin(animes, eq(animes.id, seasons.animeId))
       .where(and(eq(episodes.watched, false), gt(episodes.progressSeconds, 0)))
       .orderBy(desc(animes.lastWatchedAt), animes.titleRomaji, seasons.number, episodes.episodeNumber)
-      .all()
-      .map((row) => ({
-        episodeId: row.episodeId,
-        animeId: row.animeId,
-        animeTitle: row.animeTitle ?? "Unknown",
-        coverImageUrl: row.coverImageUrl,
-        backdropUrl: row.jellyfinId && this.options.jellyfinUrl
-          ? `${this.options.jellyfinUrl}/Items/${row.jellyfinId}/Images/Backdrop?maxWidth=1920&quality=90`
-          : null,
-        seasonNumber: row.seasonNumber,
-        episodeNumber: row.episodeNumber,
-        episodeTitle: row.episodeTitle,
-        label: formatEpisodeLabel(row.seasonNumber, row.episodeNumber),
-        progressSeconds: row.progressSeconds,
-        durationSeconds: row.durationSeconds,
-      }));
+      .all();
+
+    // "Next up" candidates: for anime with a watch history (lastWatchedAt set),
+    // the earliest unwatched available episode — so after finishing an episode
+    // the hero still offers the next one instead of disappearing.
+    const nextUpRows = this.db
+      .select(base)
+      .from(episodes)
+      .innerJoin(seasons, eq(seasons.id, episodes.seasonId))
+      .innerJoin(animes, eq(animes.id, seasons.animeId))
+      .where(and(eq(episodes.watched, false), eq(episodes.available, true), isNotNull(animes.lastWatchedAt)))
+      .orderBy(desc(animes.lastWatchedAt), animes.titleRomaji, seasons.number, episodes.episodeNumber)
+      .all();
+
+    const seenAnime = new Set<number>();
+    const nextUp = nextUpRows.filter((row) => {
+      if (seenAnime.has(row.animeId)) return false;
+      seenAnime.add(row.animeId);
+      return true;
+    });
+
+    const resumeAnime = new Set(resumeRows.map((r) => r.animeId));
+    const merged = [...resumeRows, ...nextUp.filter((r) => !resumeAnime.has(r.animeId))].sort((a, b) => {
+      const at = (x: number | null) => x ?? 0;
+      return at(b.lastWatchedAt) - at(a.lastWatchedAt);
+    });
+
+    return merged.map((row) => ({
+      episodeId: row.episodeId,
+      animeId: row.animeId,
+      animeTitle: row.animeTitle ?? "Unknown",
+      coverImageUrl: row.coverImageUrl,
+      backdropUrl: row.jellyfinId && this.options.jellyfinUrl
+        ? `${this.options.jellyfinUrl}/Items/${row.jellyfinId}/Images/Backdrop?maxWidth=1920&quality=90`
+        : null,
+      seasonNumber: row.seasonNumber,
+      episodeNumber: row.episodeNumber,
+      episodeTitle: row.episodeTitle,
+      label: formatEpisodeLabel(row.seasonNumber, row.episodeNumber),
+      progressSeconds: row.progressSeconds,
+      durationSeconds: row.durationSeconds,
+    }));
   }
 
   getWatching(limit = 12): WatchingItem[] {
