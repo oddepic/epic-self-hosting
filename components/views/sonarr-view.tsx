@@ -27,12 +27,16 @@ export default function SonarrView({ refreshSignal }: { refreshSignal?: number }
 
   const load = useCallback(async () => {
     setError(false);
-    const res = await fetch("/api/sonarr/library");
-    if (res.ok) {
-      const body = await res.json() as { overview: SonarrOverview; library: SonarrLibraryRow[] };
-      setOverview(body.overview);
-      setLibrary(body.library);
-    } else {
+    try {
+      const res = await fetch("/api/sonarr/library");
+      if (res.ok) {
+        const body = await res.json() as { overview: SonarrOverview; library: SonarrLibraryRow[] };
+        setOverview(body.overview);
+        setLibrary(body.library);
+      } else {
+        setError(true);
+      }
+    } catch {
       setError(true);
     }
     setLoaded(true);

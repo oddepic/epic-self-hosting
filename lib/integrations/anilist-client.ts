@@ -154,10 +154,13 @@ export class AniListHttpClient implements AniListClient {
   }
 
   private async post<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    // A dead network must not hang the dashboard forever (the route calls
+    // AniList on every render with no user-visible progress).
     const response = await fetch(this.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(15_000),
     });
 
     if (response.status === 429) {

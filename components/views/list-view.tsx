@@ -43,10 +43,14 @@ export default function ListView({ onOpenAnime, refreshSignal }: Props) {
     const params = new URLSearchParams();
     if (search.trim()) params.set("q", search.trim());
 
-    const res = await fetch(`/api/library?${params.toString()}`);
-    if (res.ok) {
-      const body = (await res.json()) as { sections: Section[] };
-      setSections(body.sections);
+    try {
+      const res = await fetch(`/api/library?${params.toString()}`);
+      if (res.ok) {
+        const body = (await res.json()) as { sections: Section[] };
+        setSections(body.sections);
+      }
+    } catch {
+      // Transient failure; leave the current sections and let the next load retry.
     }
     setLoading(false);
   }, [search]);

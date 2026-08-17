@@ -45,17 +45,21 @@ export default function DownloadsView({ refreshSignal }: { refreshSignal?: numbe
   const [importing, setImporting] = useState(false);
 
   async function load() {
-    const [downloadsRes, importRes] = await Promise.all([
-      fetch("/api/downloads"),
-      fetch("/api/sonarr/import"),
-    ]);
-    if (downloadsRes.ok) {
-      const body = (await downloadsRes.json()) as { items: DownloadItem[] };
-      setItems(body.items);
-    }
-    if (importRes.ok) {
-      const body = (await importRes.json()) as { items: PendingImportItem[] };
-      setPending(body.items);
+    try {
+      const [downloadsRes, importRes] = await Promise.all([
+        fetch("/api/downloads"),
+        fetch("/api/sonarr/import"),
+      ]);
+      if (downloadsRes.ok) {
+        const body = (await downloadsRes.json()) as { items: DownloadItem[] };
+        setItems(body.items);
+      }
+      if (importRes.ok) {
+        const body = (await importRes.json()) as { items: PendingImportItem[] };
+        setPending(body.items);
+      }
+    } catch {
+      // Transient failure; the 10s interval retries.
     }
     setLoaded(true);
   }

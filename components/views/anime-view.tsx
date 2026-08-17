@@ -34,16 +34,21 @@ export default function AnimeView({
   const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/dashboard");
-    if (res.ok) {
-      const body = await res.json() as {
-        continueWatching: ContinueWatchingItem[];
-        watching: WatchingItem[];
-        upcoming: UpcomingItem[];
-      };
-      setContinueWatching(body.continueWatching);
-      setWatching(body.watching);
-      setUpcoming(body.upcoming);
+    try {
+      const res = await fetch("/api/dashboard");
+      if (res.ok) {
+        const body = await res.json() as {
+          continueWatching: ContinueWatchingItem[];
+          watching: WatchingItem[];
+          upcoming: UpcomingItem[];
+        };
+        setContinueWatching(body.continueWatching);
+        setWatching(body.watching);
+        setUpcoming(body.upcoming);
+      }
+    } catch {
+      // Transient failures (dev-server compile, network) leave the view
+      // empty; a refresh or the next load retries.
     }
     setLoaded(true);
   }, []);
