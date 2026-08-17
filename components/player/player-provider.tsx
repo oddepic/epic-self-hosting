@@ -348,6 +348,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       } else if (e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
         togglePlay();
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        toggleFullscreen();
+      } else if (e.key === "m" || e.key === "M") {
+        e.preventDefault();
+        setVolumeLevel(volume > 0 ? 0 : 1);
       } else if (e.key === "Escape" && !document.fullscreenElement) {
         // In fullscreen the browser owns Escape (exits fullscreen); outside
         // it, Escape does the same as the back arrow: back to home.
@@ -357,7 +363,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, skip, togglePlay, skipSeconds, router]);
+  }, [mode, skip, togglePlay, skipSeconds, router, toggleFullscreen, setVolumeLevel, volume]);
 
   return (
     <PlayerContext.Provider value={value}>
