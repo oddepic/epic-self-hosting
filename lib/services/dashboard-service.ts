@@ -197,7 +197,7 @@ export class DashboardService {
         nextEpisodeAt: animes.nextEpisodeAt,
       })
       .from(animes)
-      .where(and(isNotNull(animes.nextEpisodeAt), gt(animes.nextEpisodeAt, now)))
+      .where(and(isNotNull(animes.nextEpisodeAt), gt(animes.nextEpisodeAt, now), eq(animes.status, "watching")))
       .orderBy(animes.nextEpisodeAt)
       .limit(limit)
       .all()

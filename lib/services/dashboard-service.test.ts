@@ -208,6 +208,7 @@ describe("DashboardService", () => {
 
     it("refreshes airing times via AniList and uses the fresh values", async () => {
       const animeId = seedAnime(db, { titleRomaji: "Airing", nextEpisodeAt: 500 });
+      // The fake simulates the client's output, which is already in ms.
       const anilist = fakeAniList([{ anilistId: 999, airingAt: 3_000, episode: 7 }]);
       db.update(animes).set({ anilistId: 999 }).where(eq(animes.id, animeId)).run();
 

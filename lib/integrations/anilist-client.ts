@@ -132,7 +132,9 @@ export class AniListHttpClient implements AniListClient {
       );
       return (body.data?.Page?.media ?? []).map((media) => ({
         anilistId: media.id,
-        airingAt: media.nextAiringEpisode?.airingAt ?? null,
+        // AniList airingAt is unix SECONDS; the app compares against
+        // Date.now() (ms), so normalize here.
+        airingAt: media.nextAiringEpisode?.airingAt != null ? media.nextAiringEpisode.airingAt * 1000 : null,
         episode: media.nextAiringEpisode?.episode ?? null,
       }));
     });
@@ -189,7 +191,9 @@ function mapMedia(m: AnilistMedia): AniListItem {
     format: m.format,
     seasonYear: m.startDate.year,
     episodeCount: m.episodes,
-    nextEpisodeAt: m.nextAiringEpisode?.airingAt ?? null,
+    // AniList airingAt is unix SECONDS; the app compares against Date.now()
+    // (ms), so normalize here.
+    nextEpisodeAt: m.nextAiringEpisode?.airingAt != null ? m.nextAiringEpisode.airingAt * 1000 : null,
   };
 }
 

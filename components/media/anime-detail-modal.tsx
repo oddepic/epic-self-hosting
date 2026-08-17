@@ -30,13 +30,6 @@ function formatClock(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function airsIn(nextEpisodeAt: number, now: number): string {
-  const diffMs = nextEpisodeAt - now;
-  if (diffMs < 24 * 60 * 60 * 1000) return "today";
-  if (diffMs < 48 * 60 * 60 * 1000) return "tomorrow";
-  return `in ${Math.ceil(diffMs / (24 * 60 * 60 * 1000))} days`;
-}
-
 function episodeStatusText(episode: { watched: boolean; available: boolean; progressSeconds: number; durationSeconds: number | null }): string {
   if (episode.watched) return "Watched";
   if (episode.progressSeconds > 0) {
@@ -56,7 +49,6 @@ interface Props {
 
 export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: Props) {
   const router = useRouter();
-  const [now] = useState(() => Date.now());
   const [detail, setDetail] = useState<AnimeDetail | null>(null);
   // Start from the persisted season (if any) so the very first fetch already
   // targets the right season instead of flashing the default one.
@@ -174,7 +166,6 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     ? newAnime.bannerImageUrl ?? newAnime.coverImageUrl
     : anime?.bannerImageUrl ?? anime?.coverImageUrl ?? null;
   const primary = detail ? (detail.resume ?? detail.start) : null;
-  const nextEpisodeAt = newAnime?.nextEpisodeAt ?? anime?.nextEpisodeAt ?? null;
   const metadata = newAnime
     ? [
         newAnime.format,
@@ -343,11 +334,6 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
               {newAnime?.romajiTitle ?? anime?.titleRomaji}
             </p>
             <p className="mt-1 font-mono text-[11px] uppercase tracking-wider text-text-muted">{metadata}</p>
-            {nextEpisodeAt != null && nextEpisodeAt > now && (
-              <p className="mt-1 font-mono text-[11px] uppercase tracking-wider text-text-muted">
-                Next episode · {airsIn(nextEpisodeAt, now)}
-              </p>
-            )}
             <div className="mt-3 flex items-center gap-3">
               {primary && (
                 <Button

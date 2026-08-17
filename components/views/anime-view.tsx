@@ -8,8 +8,17 @@ import Skeleton from "@/components/ui/skeleton";
 import MediaCard, { MediaRow } from "@/components/media/media-card";
 import type {
   ContinueWatchingItem,
+  UpcomingItem,
   WatchingItem,
 } from "@/lib/services/dashboard-service";
+
+function formatAiringDate(timestamp: number): string {
+  const date = new Date(timestamp);
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${dd}/${mm} - ${time}`;
+}
 
 export default function AnimeView({
   onOpenAnime,
@@ -21,6 +30,7 @@ export default function AnimeView({
   const router = useRouter();
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [watching, setWatching] = useState<WatchingItem[]>([]);
+  const [upcoming, setUpcoming] = useState<UpcomingItem[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
@@ -29,9 +39,11 @@ export default function AnimeView({
       const body = await res.json() as {
         continueWatching: ContinueWatchingItem[];
         watching: WatchingItem[];
+        upcoming: UpcomingItem[];
       };
       setContinueWatching(body.continueWatching);
       setWatching(body.watching);
+      setUpcoming(body.upcoming);
     }
     setLoaded(true);
   }, []);
@@ -127,6 +139,31 @@ export default function AnimeView({
             />
           ))}
         </MediaRow>
+      )}
+
+      {upcoming.length > 0 && (
+        <div className="mt-10">
+          <h3 className="font-mono text-xs font-medium uppercase tracking-[0.2em] text-text-muted">
+            Upcoming episodes
+          </h3>
+          <div className="mt-3 overflow-hidden rounded-xl border border-border">
+            {upcoming.map((item) => (
+              <button
+                key={item.animeId}
+                onClick={() => onOpenAnime(item.animeId)}
+                className="flex w-full items-baseline gap-3 border-b border-border px-4 py-2.5 text-left transition-colors last:border-b-0 hover:bg-surface-hover"
+              >
+                <span className="truncate text-sm text-text-primary">
+                  {item.titleEnglish ?? item.titleRomaji}
+                </span>
+                <span className="mx-1 flex-1 border-b border-dotted border-text-muted/40" aria-hidden />
+                <span className="shrink-0 font-mono text-xs text-text-secondary">
+                  {formatAiringDate(item.nextEpisodeAt)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
