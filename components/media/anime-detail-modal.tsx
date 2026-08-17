@@ -50,6 +50,7 @@ interface Props {
 export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: Props) {
   const router = useRouter();
   const [detail, setDetail] = useState<AnimeDetail | null>(null);
+  const [progressInput, setProgressInput] = useState("");
   // Start from the persisted season (if any) so the very first fetch already
   // targets the right season instead of flashing the default one.
   const [season, setSeason] = useState<number | undefined>(() => {
@@ -129,6 +130,21 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
 
   const newAnime = animeId == null ? item : null;
   const anime = detail?.anime ?? null;
+
+  // Progress (watched episode count) for the season being viewed, editable
+  // next to the status when the anime is in progress.
+  const selectedSeasonNumber = season ?? detail?.resume?.seasonNumber ?? detail?.seasons[0]?.number ?? null;
+  const seasonSummary = detail?.seasons.find((s) => s.number === selectedSeasonNumber) ?? null;
+  const seasonEpisodes = detail?.episodes ?? [];
+  const progressCount = seasonSummary?.watchedCount ?? 0;
+  const seasonTotal = seasonSummary?.totalCount ?? 0;
+  const nextUnwatched = seasonEpisodes.find((e) => !e.watched) ?? null;
+  const showProgress =
+    anime != null && !newAnime && anime.status !== "completed" && anime.status !== "plan_to_watch";
+
+  useEffect(() => {
+    setProgressInput(String(progressCount));
+  }, [progressCount]);
 
   const addItem: SearchItem | null = useMemo(() => {
     if (newAnime) return newAnime;
@@ -309,6 +325,48 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
 
   const addPhase = addState?.phase ?? derivedAddPhase;
 
+  async function onCommitProgress(value: string) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n) || n < 1 || seasonTotal === 0) {
+      setProgressInput(String(progressCount));
+      return;
+    }
+    const clamped = Math.min(n, seasonTotal);
+    const target = seasonEpisodes.find((e) => e.episodeNumber === clamped);
+    if (!target) {
+      setProgressInput(String(progressCount));
+      return;
+    }
+    if (clamped === progressCount) {
+      setProgressInput(String(progressCount));
+      return;
+    }
+    const res = await fetch("/api/episodes/set-watched", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ episodeId: target.id }),
+    });
+    if (res.ok) {
+      void load();
+      onChanged();
+    } else {
+      setProgressInput(String(progressCount));
+    }
+  }
+
+  async function onMarkNext() {
+    if (!nextUnwatched) return;
+    const res = await fetch("/api/episodes/watched", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ episodeId: nextUnwatched.id }),
+    });
+    if (res.ok) {
+      void load();
+      onChanged();
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4">
       <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border-strong bg-surface">
@@ -360,19 +418,53 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                 </Button>
               )}
               {anime && !newAnime && (
-                <select
-                  name="status"
-                  value={anime.status}
-                  onChange={(e) => void onChangeStatus(e.target.value)}
-                  disabled={changingStatus}
-                  className="rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary disabled:opacity-50"
-                >
-                  {STATUS_ORDER.map((s) => (
-                    <option key={s} value={s}>
-                      {STATUS_LABELS[s]}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    name="status"
+                    value={anime.status}
+                    onChange={(e) => void onChangeStatus(e.target.value)}
+                    disabled={changingStatus}
+                    className="rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary disabled:opacity-50"
+                  >
+                    {STATUS_ORDER.map((s) => (
+                      <option key={s} value={s}>
+                        {STATUS_LABELS[s]}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="font-mono text-xs text-text-muted">
+                    Score: {anime.score ?? "—"}
+                  </span>
+                  {showProgress && seasonTotal > 0 && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={1}
+                        max={seasonTotal}
+                        value={progressInput}
+                        onChange={(e) => setProgressInput(e.target.value)}
+                        onBlur={(e) => void onCommitProgress(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            (e.target as HTMLInputElement).blur();
+                          }
+                        }}
+                        aria-label="Watched episodes"
+                        className="w-14 rounded-lg border border-border bg-surface-raised px-2 py-1.5 font-mono text-xs text-text-primary"
+                      />
+                      <span className="font-mono text-xs text-text-muted">/ {seasonTotal}</span>
+                      <button
+                        onClick={() => void onMarkNext()}
+                        disabled={!nextUnwatched}
+                        title="Mark next episode watched"
+                        aria-label="Mark next episode watched"
+                        className="rounded-lg border border-border bg-surface px-2 py-1.5 text-sm leading-none text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
             {newAnime?.synopsis && (

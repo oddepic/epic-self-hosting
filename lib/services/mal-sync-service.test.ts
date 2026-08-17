@@ -55,10 +55,10 @@ function seedEpisodes(db: Db, animeId: number, watchedFlags: boolean[]): number[
 }
 
 function fakeMal(failuresBeforeSuccess = 0): MalClient & {
-  updateCalls: { animeId: number; status: string; watchedEpisodes: number }[];
+  updateCalls: { animeId: number; status: string; watchedEpisodes: number; score: number | null }[];
   refreshCalls: number;
 } {
-  const updateCalls: { animeId: number; status: string; watchedEpisodes: number }[] = [];
+  const updateCalls: { animeId: number; status: string; watchedEpisodes: number; score: number | null }[] = [];
   const state = { refreshCalls: 0, failuresLeft: failuresBeforeSuccess };
   return {
     updateCalls,
@@ -74,12 +74,12 @@ function fakeMal(failuresBeforeSuccess = 0): MalClient & {
     async getMyList() {
       return [];
     },
-    async updateStatus(_accessToken: string, animeId: number, status: string, watchedEpisodes: number) {
+    async updateStatus(_accessToken: string, animeId: number, status: string, watchedEpisodes: number, score: number | null) {
       if (state.failuresLeft > 0) {
         state.failuresLeft--;
         throw new Error("MAL status update failed: 500");
       }
-      updateCalls.push({ animeId, status, watchedEpisodes });
+      updateCalls.push({ animeId, status, watchedEpisodes, score });
     },
     async refreshAccessToken() {
       state.refreshCalls++;
@@ -122,7 +122,7 @@ describe("MalSyncService", () => {
 
   describe("pushStatus", () => {
     it("pushes the current status and locally counted watched episodes", async () => {
-      const { animeId, userId } = seedAnime(db);
+      const { animeId, userId } = seedAnime(db, { score: 8 });
       seedEpisodes(db, animeId, [true, false, true]);
       db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
       const mal = fakeMal();
@@ -131,7 +131,7 @@ describe("MalSyncService", () => {
       await service.pushStatus(userId, animeId);
 
       expect(mal.updateCalls).toEqual([
-        { animeId: 12345, status: "watching", watchedEpisodes: 2 },
+        { animeId: 12345, status: "watching", watchedEpisodes: 2, score: 8 },
       ]);
     });
 
@@ -144,7 +144,7 @@ describe("MalSyncService", () => {
 
       await service.pushStatus(userId, animeId);
 
-      expect(mal.updateCalls).toEqual([{ animeId: 12345, status: "dropped", watchedEpisodes: 0 }]);
+      expect(mal.updateCalls).toEqual([{ animeId: 12345, status: "dropped", watchedEpisodes: 0, score: null }]);
     });
 
     it("refreshes expired tokens before pushing and persists the fresh pair", async () => {
@@ -214,7 +214,7 @@ describe("MalSyncService", () => {
       await service.pushEpisodeCompletion(userId, ep1);
 
       expect(mal.updateCalls).toEqual([
-        { animeId: 12345, status: "watching", watchedEpisodes: 1 },
+        { animeId: 12345, status: "watching", watchedEpisodes: 1, score: null },
       ]);
     });
 
@@ -228,7 +228,7 @@ describe("MalSyncService", () => {
       await service.pushEpisodeCompletion(userId, eps[eps.length - 1]);
 
       expect(mal.updateCalls).toEqual([
-        { animeId: 12345, status: "completed", watchedEpisodes: 3 },
+        { animeId: 12345, status: "completed", watchedEpisodes: 3, score: null },
       ]);
     });
 
@@ -242,7 +242,45 @@ describe("MalSyncService", () => {
       await service.pushEpisodeCompletion(userId, eps[eps.length - 1]);
 
       expect(mal.updateCalls).toEqual([
-        { animeId: 12345, status: "dropped", watchedEpisodes: 3 },
+        { animeId: 12345, status: "dropped", watchedEpisodes: 3, score: null },
+      ]);
+    });
+
+    it("ignores specials (season 0) in the count and the total", async () => {
+      const { animeId, userId } = seedAnime(db);
+      const [ep1] = seedEpisodes(db, animeId, [true, false]);
+      const specials = db.insert(seasons).values({ animeId, number: 0 }).returning().get();
+      db.insert(episodes).values({ seasonId: specials.id, episodeNumber: 1, watched: true, progressSeconds: 0 }).run();
+      db.insert(episodes).values({ seasonId: specials.id, episodeNumber: 2, watched: true, progressSeconds: 0 }).run();
+      db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
+      const mal = fakeMal();
+      const service = makeService(db, mal);
+
+      await service.pushEpisodeCompletion(userId, ep1);
+
+      expect(mal.updateCalls).toEqual([
+        { animeId: 12345, status: "watching", watchedEpisodes: 1, score: null },
+      ]);
+    });
+
+    it("counts only the action season when the row overhangs its MAL entry", async () => {
+      const { animeId, userId } = seedAnime(db, { episodeCount: 2 });
+      seedEpisodes(db, animeId, [true, true]);
+      const season2 = db.insert(seasons).values({ animeId, number: 2 }).returning().get();
+      const s2e1 = db
+        .insert(episodes)
+        .values({ seasonId: season2.id, episodeNumber: 1, watched: true, progressSeconds: 0 })
+        .returning()
+        .get();
+      db.insert(episodes).values({ seasonId: season2.id, episodeNumber: 2, watched: false, progressSeconds: 0 }).run();
+      db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
+      const mal = fakeMal();
+      const service = makeService(db, mal);
+
+      await service.pushEpisodeCompletion(userId, s2e1.id);
+
+      expect(mal.updateCalls).toEqual([
+        { animeId: 12345, status: "watching", watchedEpisodes: 1, score: null },
       ]);
     });
   });

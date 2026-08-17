@@ -1,0 +1,1 @@
+ALTER TABLE `animes` ADD `score` integer;

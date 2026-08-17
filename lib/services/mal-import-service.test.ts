@@ -21,6 +21,7 @@ function makeEntry(overrides: Partial<MalListEntry> = {}): MalListEntry {
     title: "Fullmetal Alchemist: Brotherhood",
     status: "watching",
     watchedEpisodes: 5,
+    score: null,
     ...overrides,
   };
 }

@@ -26,6 +26,7 @@ export interface MalListEntry {
   title: string | null;
   status: "watching" | "completed" | "on_hold" | "dropped" | "plan_to_watch";
   watchedEpisodes: number;
+  score: number | null;
 }
 
 export interface MalToken {
@@ -38,7 +39,7 @@ export interface MalClient {
   createAuthUrl(state: string, codeChallenge: string): string;
   exchangeCode(code: string, codeVerifier: string): Promise<MalToken>;
   getMyList(accessToken: string): Promise<MalListEntry[]>;
-  updateStatus(accessToken: string, animeId: number, status: MalListEntry["status"], watchedEpisodes: number): Promise<void>;
+  updateStatus(accessToken: string, animeId: number, status: MalListEntry["status"], watchedEpisodes: number, score?: number | null): Promise<void>;
   refreshAccessToken(refreshToken: string): Promise<MalToken>;
 }
 

@@ -77,7 +77,7 @@ export class MalHttpClient implements MalClient {
       const body = (await response.json()) as {
         data: {
           node: { id: number; title: string };
-          list_status: { status: MalListEntry["status"]; num_watched_episodes: number };
+          list_status: { status: MalListEntry["status"]; num_watched_episodes: number; score: number | null };
         }[];
         paging?: { next?: string | null };
       };
@@ -87,6 +87,7 @@ export class MalHttpClient implements MalClient {
           title: item.node.title,
           status: item.list_status.status,
           watchedEpisodes: item.list_status.num_watched_episodes,
+          score: item.list_status.score ?? null,
         });
       }
       url = body.paging?.next ?? null;
@@ -100,8 +101,12 @@ export class MalHttpClient implements MalClient {
     animeId: number,
     status: MalListEntry["status"],
     watchedEpisodes: number,
+    score?: number | null,
   ): Promise<void> {
     const form = new URLSearchParams({ status, num_watched_episodes: String(watchedEpisodes) });
+    if (score != null && score > 0) {
+      form.set("score", String(score));
+    }
     const response = await fetch(`${API_BASE}/anime/${animeId}/my_list_status`, {
       method: "PATCH",
       headers: {

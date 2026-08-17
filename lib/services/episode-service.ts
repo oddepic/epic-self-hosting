@@ -38,8 +38,8 @@ export function unwatchThrough(db: Db, input: { episodeId: number }): number {
   const ids = rows
     .filter(
       (row) =>
-        row.seasonNumber < targetSeason.number ||
-        (row.seasonNumber === targetSeason.number && row.episode.episodeNumber <= target.episodeNumber),
+        row.seasonNumber === targetSeason.number &&
+        row.episode.episodeNumber <= target.episodeNumber,
     )
     .map((row) => row.episode.id);
 
@@ -59,8 +59,7 @@ export function unwatchThrough(db: Db, input: { episodeId: number }): number {
   return unmarked;
 }
 
-export function completeEpisodeThrough(db: Db, input: CompleteEpisodeThroughInput): number {
-  const target = db.select().from(episodes).where(eq(episodes.id, input.episodeId)).get();
+export function completeEpisodeThrough(db: Db, input: CompleteEpisodeThroughInput): number {  const target = db.select().from(episodes).where(eq(episodes.id, input.episodeId)).get();
   if (!target) return 0;
   const targetSeason = db.select().from(seasons).where(eq(seasons.id, target.seasonId)).get();
   if (!targetSeason) return 0;
@@ -74,8 +73,8 @@ export function completeEpisodeThrough(db: Db, input: CompleteEpisodeThroughInpu
   const toComplete = rows
     .filter(
       (row) =>
-        row.seasonNumber < targetSeason.number ||
-        (row.seasonNumber === targetSeason.number && row.episode.episodeNumber <= target.episodeNumber),
+        row.seasonNumber === targetSeason.number &&
+        row.episode.episodeNumber <= target.episodeNumber,
     )
     .sort((a, b) => a.seasonNumber - b.seasonNumber || a.episode.episodeNumber - b.episode.episodeNumber);
 
@@ -93,6 +92,52 @@ export function completeEpisodeThrough(db: Db, input: CompleteEpisodeThroughInpu
     }
   });
   return completed;
+}
+
+export interface SetWatchedThroughResult {
+  marked: number;
+  unmarked: number;
+}
+
+// Set the watched count of a season to exactly N (the target episode's
+// number): mark through N, unwatch everything beyond N in that season.
+export function setWatchedThrough(db: Db, input: CompleteEpisodeThroughInput): SetWatchedThroughResult {
+  const target = db.select().from(episodes).where(eq(episodes.id, input.episodeId)).get();
+  if (!target) return { marked: 0, unmarked: 0 };
+  const targetSeason = db.select().from(seasons).where(eq(seasons.id, target.seasonId)).get();
+  if (!targetSeason) return { marked: 0, unmarked: 0 };
+
+  const rows = db
+    .select({ episode: episodes, seasonNumber: seasons.number })
+    .from(episodes)
+    .innerJoin(seasons, eq(seasons.id, episodes.seasonId))
+    .where(eq(seasons.animeId, targetSeason.animeId))
+    .all();
+
+  let marked = 0;
+  let unmarked = 0;
+  db.transaction((tx) => {
+    for (const row of rows) {
+      if (row.seasonNumber !== targetSeason.number) continue;
+      if (row.episode.episodeNumber <= target.episodeNumber) {
+        if (row.episode.watched) continue;
+        completeEpisode(tx, {
+          episodeId: row.episode.id,
+          userId: input.userId,
+          positionSeconds: row.episode.durationSeconds ?? 0,
+          now: input.now,
+        });
+        marked++;
+      } else if (row.episode.watched) {
+        tx.update(episodes).set({ watched: false, progressSeconds: 0 }).where(eq(episodes.id, row.episode.id)).run();
+        tx.delete(playbackHistory)
+          .where(and(eq(playbackHistory.episodeId, row.episode.id), eq(playbackHistory.completed, true)))
+          .run();
+        unmarked++;
+      }
+    }
+  });
+  return { marked, unmarked };
 }
 
 export interface CompleteEpisodeInput {

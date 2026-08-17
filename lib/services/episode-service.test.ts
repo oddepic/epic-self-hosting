@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb, type Db } from "../db/client";
 import { animes, seasons, episodes, users, playbackHistory } from "../db/schema";
-import { completeEpisode, completeEpisodeThrough, unwatchEpisode, unwatchThrough } from "./episode-service";
+import { completeEpisode, completeEpisodeThrough, setWatchedThrough, unwatchEpisode, unwatchThrough } from "./episode-service";
 
 describe("completeEpisode", () => {
   let db: Db;
@@ -107,11 +107,13 @@ describe("completeEpisodeThrough", () => {
     expect(db.select().from(playbackHistory).all()).toHaveLength(2);
   });
 
-  it("marks a target in a later season including earlier seasons", () => {
+  it("marks only the target season, never earlier seasons", () => {
     const completed = completeEpisodeThrough(db, { episodeId: epIds.s2e1!, userId, now: () => 1000 });
 
-    expect(completed).toBe(3);
-    expect(db.select().from(episodes).all().every((e) => e.watched)).toBe(true);
+    expect(completed).toBe(1);
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s2e1!)).get()!.watched).toBe(true);
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e1!)).get()!.watched).toBe(false);
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e2!)).get()!.watched).toBe(false);
   });
 
   it("returns zero for an unknown episode", () => {
@@ -129,13 +131,33 @@ describe("completeEpisodeThrough", () => {
   });
 
   it("unwatches everything up to and including the target", () => {
-    completeEpisodeThrough(db, { episodeId: epIds.s2e1!, userId, now: () => 1000 });
+    completeEpisodeThrough(db, { episodeId: epIds.s1e2!, userId, now: () => 1000 });
 
     const unmarked = unwatchThrough(db, { episodeId: epIds.s1e2! });
 
     expect(unmarked).toBe(2);
     expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e1!)).get()!.watched).toBe(false);
     expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e2!)).get()!.watched).toBe(false);
-    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s2e1!)).get()!.watched).toBe(true);
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s2e1!)).get()!.watched).toBe(false);
+  });
+
+  it("sets the watched count to exactly the target episode within the season", () => {
+    completeEpisodeThrough(db, { episodeId: epIds.s1e2!, userId, now: () => 1000 });
+
+    const result = setWatchedThrough(db, { episodeId: epIds.s1e1!, userId, now: () => 2000 });
+
+    expect(result).toEqual({ marked: 0, unmarked: 1 });
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e1!)).get()!.watched).toBe(true);
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e2!)).get()!.watched).toBe(false);
+    // A different season is never touched.
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s2e1!)).get()!.watched).toBe(false);
+  });
+
+  it("marks forward when the target is beyond the current watched count", () => {
+    const result = setWatchedThrough(db, { episodeId: epIds.s1e2!, userId, now: () => 1000 });
+
+    expect(result).toEqual({ marked: 2, unmarked: 0 });
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e1!)).get()!.watched).toBe(true);
+    expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e2!)).get()!.watched).toBe(true);
   });
 });
