@@ -86,4 +86,8 @@ export class LibraryService {
   setStatus(animeId: number, status: AnimeStatus): void {
     this.db.update(animes).set({ status, updatedAt: Date.now() }).where(eq(animes.id, animeId)).run();
   }
+
+  setScore(animeId: number, score: number): void {
+    this.db.update(animes).set({ score, updatedAt: Date.now() }).where(eq(animes.id, animeId)).run();
+  }
 }

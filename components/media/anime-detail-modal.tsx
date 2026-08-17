@@ -16,6 +16,21 @@ const STATUS_LABELS: Record<string, string> = {
   dropped: "Dropped",
 };
 
+// MAL's score scale with its descriptive labels.
+const MAL_SCORES: { value: number; label: string }[] = [
+  { value: 0, label: "No score" },
+  { value: 10, label: "10 - Masterpiece" },
+  { value: 9, label: "9 - Great" },
+  { value: 8, label: "8 - Very Good" },
+  { value: 7, label: "7 - Good" },
+  { value: 6, label: "6 - Fine" },
+  { value: 5, label: "5 - Average" },
+  { value: 4, label: "4 - Bad" },
+  { value: 3, label: "3 - Very Bad" },
+  { value: 2, label: "2 - Horrible" },
+  { value: 1, label: "1 - Appalling" },
+];
+
 const STATUS_ORDER = ["watching", "completed", "plan_to_watch", "on_hold", "dropped"] as const;
 
 function formatDuration(seconds: number | null): string {
@@ -208,6 +223,21 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ animeId, status }),
+    });
+    setChangingStatus(false);
+    if (res.ok) {
+      void load();
+      onChanged();
+    }
+  }
+
+  async function onChangeScore(score: number) {
+    if (animeId == null) return;
+    setChangingStatus(true);
+    const res = await fetch("/api/library/score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ animeId, score }),
     });
     setChangingStatus(false);
     if (res.ok) {
@@ -432,27 +462,42 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                       </option>
                     ))}
                   </select>
-                  <span className="font-mono text-xs text-text-muted">
-                    Score: {anime.score ?? "—"}
-                  </span>
+                  <select
+                    name="score"
+                    value={anime.score ?? 0}
+                    onChange={(e) => void onChangeScore(Number(e.target.value))}
+                    disabled={changingStatus}
+                    aria-label="Score"
+                    className="rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary disabled:opacity-50"
+                  >
+                    {MAL_SCORES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
                   {showProgress && seasonTotal > 0 && (
                     <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={1}
-                        max={seasonTotal}
-                        value={progressInput}
-                        onChange={(e) => setProgressInput(e.target.value)}
-                        onBlur={(e) => void onCommitProgress(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            (e.target as HTMLInputElement).blur();
-                          }
-                        }}
-                        aria-label="Watched episodes"
-                        className="w-14 rounded-lg border border-border bg-surface-raised px-2 py-1.5 font-mono text-xs text-text-primary"
-                      />
-                      <span className="font-mono text-xs text-text-muted">/ {seasonTotal}</span>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min={1}
+                          max={seasonTotal}
+                          value={progressInput}
+                          onChange={(e) => setProgressInput(e.target.value)}
+                          onBlur={(e) => void onCommitProgress(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              (e.target as HTMLInputElement).blur();
+                            }
+                          }}
+                          aria-label="Watched episodes"
+                          className="w-16 rounded-lg border border-border bg-surface-raised px-2 py-1.5 pr-7 font-mono text-xs text-text-primary"
+                        />
+                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center font-mono text-xs text-text-muted">
+                          / {seasonTotal}
+                        </span>
+                      </div>
                       <button
                         onClick={() => void onMarkNext()}
                         disabled={!nextUnwatched}
