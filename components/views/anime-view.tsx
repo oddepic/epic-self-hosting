@@ -97,7 +97,7 @@ export default function AnimeView({
             </p>
             <Button
               variant="primary"
-              className="mt-3 px-5 py-2.5"
+              className="mt-3.5 px-5 py-2.5"
               onClick={() => router.push(`/watch/${hero.episodeId}`)}
             >
               <Play className="mr-2 inline h-4 w-4" fill="currentColor" strokeWidth={0} aria-hidden />
