@@ -500,7 +500,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           )}
 
           {mode === "big" && skipTarget && (
-            <div className="absolute bottom-24 right-6">
+            <div className="absolute bottom-24 right-6 z-10">
               <button
                 onClick={() => {
                   const video = videoRef.current;
@@ -512,7 +512,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                   }
                   showControls();
                 }}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
+                className="cursor-pointer rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
               >
                 <SkipForward className="mr-1.5 inline h-4 w-4" aria-hidden />
                 {skipTarget.kind === "intro" ? "Skip Intro" : "Skip Ending"}
@@ -521,10 +521,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           )}
 
           {mode === "big" && continueEpisode && (
-            <div className="absolute bottom-24 right-6">
+            <div className="absolute bottom-24 right-6 z-10">
               <button
                 onClick={() => void play(continueEpisode.episodeId)}
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
+                className="cursor-pointer rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
               >
                 <SkipForward className="mr-1.5 inline h-4 w-4" aria-hidden />
                 {continueEpisode.episodeNumber != null
