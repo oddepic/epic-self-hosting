@@ -100,6 +100,9 @@ function fakeJellyfin(): JellyfinClient & {
     async runScheduledTask() {
       return false;
     },
+    async isLibraryScanRunning() {
+      return false;
+    },
     async requestPlayback() {},
     async deleteItem() {},
     async refreshLibrary() {},

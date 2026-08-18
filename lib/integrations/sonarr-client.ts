@@ -29,6 +29,7 @@ interface SonarrEpisodeResource {
   episodeNumber: number;
   absoluteEpisodeNumber: number | null;
   title: string | null;
+  hasFile?: boolean;
 }
 
 export class SonarrHttpClient implements SonarrClient {
@@ -89,6 +90,7 @@ export class SonarrHttpClient implements SonarrClient {
       episodeNumber: e.episodeNumber,
       absoluteEpisodeNumber: e.absoluteEpisodeNumber,
       title: e.title,
+      hasFile: e.hasFile === true,
     }));
   }
 

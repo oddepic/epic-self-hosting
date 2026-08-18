@@ -59,6 +59,7 @@ export interface SonarrEpisode {
   episodeNumber: number;
   absoluteEpisodeNumber: number | null;
   title: string | null;
+  hasFile?: boolean;
 }
 
 export interface SonarrSeries {
@@ -189,6 +190,7 @@ export interface JellyfinClient {
   getIntroAnalysisTaskId(): Promise<string | null>;
   getIntroScanStatus(): Promise<boolean>;
   runScheduledTask(taskId: string): Promise<boolean>;
+  isLibraryScanRunning(): Promise<boolean>;
   requestPlayback(sessionId: string, itemId: string, startPositionTicks?: number): Promise<void>;
   deleteItem(id: string): Promise<void>;
   refreshLibrary(): Promise<void>;

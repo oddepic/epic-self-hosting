@@ -165,6 +165,9 @@ function fakeJellyfin(behavior: {
     async runScheduledTask() {
       return false;
     },
+    async isLibraryScanRunning() {
+      return false;
+    },
     async requestPlayback() {},
     async deleteItem() {},
     async refreshLibrary() {
@@ -549,9 +552,10 @@ describe("AvailabilityService.sync", () => {
     const { animeId } = seedAnime(db, { sonarrId: 42 });
     db.update(episodes).set({ sonarrEpisodeId: 101 }).run();
     const sonarr = fakeSonarr();
-    sonarr.getEpisodeFiles = async () => [
-      { episodes: [{ id: 101 }, { id: 999 }] },
-      { episodes: [{ id: 102 }] },
+    sonarr.getEpisodes = async () => [
+      { id: 101, seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: 1, title: null, hasFile: true },
+      { id: 999, seasonNumber: 1, episodeNumber: 2, absoluteEpisodeNumber: 2, title: null, hasFile: true },
+      { id: 102, seasonNumber: 1, episodeNumber: 3, absoluteEpisodeNumber: 3, title: null, hasFile: false },
     ];
     const jellyfin = fakeJellyfin();
     service = new AvailabilityService(db, jellyfin, sonarr, { rebuildDelayMs: 0 });

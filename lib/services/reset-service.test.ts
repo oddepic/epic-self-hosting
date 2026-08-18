@@ -124,6 +124,9 @@ function fakeJellyfin(): JellyfinClient & { deleted: string[]; refreshed: number
     async runScheduledTask() {
       return false;
     },
+    async isLibraryScanRunning() {
+      return false;
+    },
     async requestPlayback() {},
     async deleteItem(id: string) {
       state.deleted.push(id);

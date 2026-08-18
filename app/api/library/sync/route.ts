@@ -7,6 +7,16 @@ import { JellyfinSdkClient } from "@/lib/integrations/jellyfin-client";
 import { SonarrHttpClient } from "@/lib/integrations/sonarr-client";
 import { publish } from "@/lib/events/bus";
 
+async function waitForLibraryScan(jellyfin: JellyfinSdkClient): Promise<void> {
+  // RefreshLibrary starts asynchronously. Give Jellyfin time to transition
+  // the task to Running, then wait until it returns to Idle (max 60s).
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  for (let attempt = 0; attempt < 60; attempt++) {
+    if (!(await jellyfin.isLibraryScanRunning())) return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+}
+
 export async function POST() {
   const config = loadConfig();
   const db = createDb(config.databaseUrl);
@@ -33,7 +43,7 @@ export async function POST() {
     if (result.missingFromJellyfin > 0) {
       try {
         await jellyfin.refreshLibrary();
-        await new Promise((resolve) => setTimeout(resolve, 10_000));
+        await waitForLibraryScan(jellyfin);
         result = await service.sync();
         rescanTriggered = true;
       } catch {

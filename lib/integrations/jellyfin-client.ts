@@ -310,6 +310,15 @@ export class JellyfinSdkClient implements JellyfinClient {
     return response.ok;
   }
 
+  async isLibraryScanRunning(): Promise<boolean> {
+    try {
+      const tasks = await this.request<{ Key?: string; State?: string }[]>("/ScheduledTasks");
+      return tasks.some((task) => task.Key === "RefreshLibrary" && task.State === "Running");
+    } catch {
+      return false;
+    }
+  }
+
   private async withFreshAuth<T>(
     token: string,
     fn: (freshToken: string) => Promise<T>,

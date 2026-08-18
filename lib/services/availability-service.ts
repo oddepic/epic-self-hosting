@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { animes, episodes, seasons, type Anime } from "../db/schema";
 import type { JellyfinClient, JellyfinSeriesItem, SonarrClient, SonarrSeries } from "../integrations/types";
@@ -297,18 +297,24 @@ export class AvailabilityService {
     for (const anime of animeRows) {
       if (anime.sonarrId == null || !this.sonarr) continue;
       try {
-        const files = (await this.sonarr.getEpisodeFiles(anime.sonarrId)) as {
-          episodes?: { id: number }[];
-        }[];
-        const fileEpisodeIds = new Set<number>();
-        for (const file of files) {
-          for (const ep of file.episodes ?? []) fileEpisodeIds.add(ep.id);
-        }
+        // Sonarr's episode-file endpoint describes files, but does not carry
+        // episode ids reliably. The episode endpoint does: hasFile is the
+        // authoritative relationship we need here.
+        const sonarrEpisodes = await this.sonarr.getEpisodes(anime.sonarrId);
+        const fileEpisodeIds = new Set(
+          sonarrEpisodes.filter((ep) => ep.hasFile === true).map((ep) => ep.id),
+        );
         if (fileEpisodeIds.size === 0) continue;
         const rows = this.db
           .select({ available: episodes.available })
           .from(episodes)
-          .where(inArray(episodes.sonarrEpisodeId, [...fileEpisodeIds]))
+          .innerJoin(seasons, eq(seasons.id, episodes.seasonId))
+          .where(
+            and(
+              eq(seasons.animeId, anime.id),
+              inArray(episodes.sonarrEpisodeId, [...fileEpisodeIds]),
+            ),
+          )
           .all();
         missingFromJellyfin += rows.filter((r) => !r.available).length;
       } catch {
