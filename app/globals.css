@@ -48,6 +48,34 @@ body {
   font-family: var(--font-inter), system-ui, sans-serif;
 }
 
+/* Minimal scrollbars that blend into the dark theme. Thin, transparent
+   track, low-contrast thumb with a subtle hover — for the window and every
+   inner panel (modal episode list, menus, etc.). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-hover) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-hover);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 ::selection {
   background: var(--accent-soft);
 }
