@@ -47,6 +47,7 @@ function makeAniListItem(overrides: Partial<AniListItem> = {}): AniListItem {
 function fakeMal(
   behavior: {
     entries?: MalListEntry[];
+    entry?: MalListEntry | null;
     refresh?: MalToken;
     refreshCalls?: number;
   } = {},
@@ -60,6 +61,9 @@ function fakeMal(
     },
     async getMyList() {
       return behavior.entries ?? [];
+    },
+    async getListEntry() {
+      return behavior.entry ?? null;
     },
     async updateStatus() {},
     async refreshAccessToken() {
@@ -259,6 +263,42 @@ describe("MalImportService.importList", () => {
 
     expect(anilist.batchCalls).toEqual([[1, 2, 9756]]);
     expect(result.imported).toBe(3);
+  });
+});
+
+describe("MalImportService.syncAnime", () => {
+  let db: Db;
+  let userId: number;
+
+  beforeEach(async () => {
+    db = createDb(":memory:");
+    userId = await seedUser(db);
+  });
+
+  it("updates the local counter and score from the current MAL entry", async () => {
+    const anime = db
+      .insert(animes)
+      .values({
+        anilistId: 9756,
+        malId: 9756,
+        titleRomaji: "Any Anime",
+        status: "watching",
+        watchedEpisodes: 0,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .returning()
+      .get();
+    db.insert(malTokens).values({ userId, ...makeToken(), updatedAt: 1 }).run();
+    const mal = fakeMal({
+      entry: makeEntry({ animeId: 9756, watchedEpisodes: 7, score: 8 }),
+    });
+    const service = new MalImportService(db, mal, fakeAniList());
+
+    await expect(service.syncAnime(userId, anime.id)).resolves.toBe(true);
+
+    const stored = db.select().from(animes).where(eq(animes.id, anime.id)).get();
+    expect(stored).toMatchObject({ watchedEpisodes: 7, score: 8 });
   });
 });
 

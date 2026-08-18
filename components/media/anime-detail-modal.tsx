@@ -78,6 +78,7 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     }
   });
   const loadGenerationRef = useRef(0);
+  const malSyncedAnimeRef = useRef<number | null>(null);
   const [changingStatus, setChangingStatus] = useState(false);
   const [addState, setAddState] = useState<{
     phase: "checking" | "confirm" | "added";
@@ -107,6 +108,28 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   useEffect(() => {
     if (animeId != null) void load();
   }, [load, animeId]);
+
+  // Pull only this anime's current MAL status when opening its modal. This
+  // keeps progress/score current without fetching the user's entire list.
+  useEffect(() => {
+    if (animeId == null || malSyncedAnimeRef.current === animeId) return;
+    malSyncedAnimeRef.current = animeId;
+    void (async () => {
+      try {
+        const response = await fetch("/api/library/mal-sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ animeId }),
+        });
+        if (response.ok) {
+          const body = (await response.json()) as { synced?: boolean };
+          if (body.synced) void load();
+        }
+      } catch {
+        // Keep local detail data when MAL is unavailable.
+      }
+    })();
+  }, [animeId, load]);
 
   // The lazy initializer only covers the first mount; when the modal switches
   // to a different anime while mounted, restore that anime's persisted season.

@@ -103,6 +103,29 @@ export class MalImportService {
     return { imported, updated, skipped, tokens: current };
   }
 
+  async syncAnime(userId: number, animeId: number): Promise<boolean> {
+    const anime = this.db.select().from(animes).where(eq(animes.id, animeId)).get();
+    if (!anime?.malId) return false;
+    const tokens = this.loadTokens(userId);
+    if (!tokens) return false;
+
+    const current = await this.ensureTokens(userId, tokens);
+    const entry = await this.mal.getListEntry(current.accessToken, anime.malId);
+    if (!entry) return false;
+
+    this.db
+      .update(animes)
+      .set({
+        status: entry.status,
+        score: entry.score,
+        watchedEpisodes: entry.watchedEpisodes,
+        updatedAt: this.now(),
+      })
+      .where(eq(animes.id, animeId))
+      .run();
+    return true;
+  }
+
   async ensureTokens(userId: number, tokens: MalToken): Promise<MalToken> {
     if (tokens.expiresAt <= this.now()) {
       const fresh = await this.mal.refreshAccessToken(tokens.refreshToken);

@@ -74,6 +74,9 @@ function fakeMal(failuresBeforeSuccess = 0): MalClient & {
     async getMyList() {
       return [];
     },
+    async getListEntry() {
+      return null;
+    },
     async updateStatus(_accessToken: string, animeId: number, status: string, watchedEpisodes: number, score: number | null) {
       if (state.failuresLeft > 0) {
         state.failuresLeft--;

@@ -39,6 +39,7 @@ export interface MalClient {
   createAuthUrl(state: string, codeChallenge: string): string;
   exchangeCode(code: string, codeVerifier: string): Promise<MalToken>;
   getMyList(accessToken: string): Promise<MalListEntry[]>;
+  getListEntry(accessToken: string, animeId: number): Promise<MalListEntry | null>;
   updateStatus(accessToken: string, animeId: number, status: MalListEntry["status"], watchedEpisodes: number, score?: number | null): Promise<void>;
   refreshAccessToken(refreshToken: string): Promise<MalToken>;
 }

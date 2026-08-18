@@ -96,6 +96,38 @@ export class MalHttpClient implements MalClient {
     return entries;
   }
 
+  async getListEntry(accessToken: string, animeId: number): Promise<MalListEntry | null> {
+    const params = new URLSearchParams({ fields: "my_list_status" });
+    const response = await fetch(`${API_BASE}/anime/${animeId}?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`MAL anime status failed: ${response.status}`);
+    }
+
+    const body = (await response.json()) as {
+      id: number;
+      title: string;
+      my_list_status?: {
+        status: MalListEntry["status"];
+        num_watched_episodes: number;
+        score: number | null;
+      } | null;
+    };
+    const entry = body;
+    const status = entry?.my_list_status;
+    if (!entry || !status) return null;
+    return {
+      animeId: entry.id,
+      title: entry.title,
+      status: status.status,
+      watchedEpisodes: status.num_watched_episodes,
+      score: status.score ?? null,
+    };
+  }
+
   async updateStatus(
     accessToken: string,
     animeId: number,
