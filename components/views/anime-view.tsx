@@ -83,10 +83,10 @@ export default function AnimeView({
             <p className="font-mono text-[11px] font-medium uppercase tracking-[0.2em] text-accent">
               Now watching
             </p>
-            <h2 className="mt-3 text-3xl font-semibold text-text-primary lg:text-4xl">
+            <h2 className="mt-4 text-3xl font-semibold text-text-primary lg:text-4xl">
               {hero.animeTitle}
             </h2>
-            <p className="mt-1.5 text-sm">
+            <p className="mt-4 text-sm">
               <span className="font-mono text-text-secondary">{hero.label}</span>
               {hero.episodeTitle && (
                 <>
@@ -97,7 +97,7 @@ export default function AnimeView({
             </p>
             <Button
               variant="primary"
-              className="mt-6 px-5 py-2.5"
+              className="mt-4 px-5 py-2.5"
               onClick={() => router.push(`/watch/${hero.episodeId}`)}
             >
               <Play className="mr-2 inline h-4 w-4" fill="currentColor" strokeWidth={0} aria-hidden />
