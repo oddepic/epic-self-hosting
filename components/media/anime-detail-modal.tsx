@@ -663,8 +663,10 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                     ) : (
                       <div className="h-14 w-24 shrink-0 rounded-lg bg-surface-hover" />
                     )}
-                    <span className="w-8 shrink-0 font-mono text-sm font-semibold text-accent">
-                      {String(episode.episodeNumber).padStart(2, "0")}
+                    <span className="w-10 shrink-0 font-mono text-sm font-semibold text-accent">
+                      {episode.absoluteNumber != null
+                        ? String(episode.absoluteNumber)
+                        : String(episode.episodeNumber).padStart(2, "0")}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-text-primary">{episode.title ?? `Episode ${episode.episodeNumber}`}</p>
