@@ -86,7 +86,7 @@ export default function AnimeView({
             <h2 className="mt-1 text-3xl font-semibold leading-none text-text-primary lg:text-4xl">
               {hero.animeTitle}
             </h2>
-            <p className="mt-2 text-sm leading-tight">
+            <p className="mt-1 text-sm leading-tight">
               <span className="font-mono text-text-secondary">{hero.label}</span>
               {hero.episodeTitle && (
                 <>
