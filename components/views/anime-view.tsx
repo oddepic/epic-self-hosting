@@ -80,13 +80,13 @@ export default function AnimeView({
           />
           <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(13,11,18,0.95),rgba(13,11,18,0.4)_50%,transparent)]" />
           <div className="absolute inset-x-0 bottom-0 max-w-2xl p-8 lg:p-12">
-            <p className="font-mono text-[11px] font-medium uppercase leading-none tracking-[0.2em] text-accent">
+            <p className="font-mono text-[11px] font-medium uppercase leading-[14px] tracking-[0.2em] text-accent">
               Now watching
             </p>
-            <h2 className="mt-1 text-3xl font-semibold leading-none text-text-primary lg:text-4xl">
+            <h2 className="mt-2 text-3xl font-semibold leading-[38px] text-text-primary lg:text-4xl lg:leading-[48px]">
               {hero.animeTitle}
             </h2>
-            <p className="mt-1 text-sm leading-tight">
+            <p className="mt-2 text-sm leading-[20px]">
               <span className="font-mono text-text-secondary">{hero.label}</span>
               {hero.episodeTitle && (
                 <>
@@ -97,7 +97,7 @@ export default function AnimeView({
             </p>
             <Button
               variant="primary"
-              className="mt-1 px-5 py-2.5"
+              className="mt-2 px-5 py-2.5"
               onClick={() => router.push(`/watch/${hero.episodeId}`)}
             >
               <Play className="mr-2 inline h-4 w-4" fill="currentColor" strokeWidth={0} aria-hidden />
