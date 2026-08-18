@@ -86,7 +86,8 @@ export default function AnimeView({
               Now watching
             </p>
             <div className="absolute inset-x-0 bottom-0 pb-8 lg:pb-12">
-              <div className="max-w-3xl px-8 lg:px-12">
+              {/* 60ch is the max width for every piece of hero content. */}
+              <div className="max-w-[60ch] px-8 lg:px-12">
                 {heroLogo ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -100,7 +101,7 @@ export default function AnimeView({
                     {hero.animeTitle}
                   </h2>
                 )}
-                <p className="mt-2 text-sm">
+                <p className="mt-3 text-sm">
                   <span className="font-mono text-text-secondary">{hero.label}</span>
                   {hero.episodeTitle && (
                     <>
@@ -110,16 +111,16 @@ export default function AnimeView({
                   )}
                 </p>
                 {hero.synopsis && (
-                  <p className="mt-3 line-clamp-2 max-w-xl text-sm leading-relaxed text-text-secondary">
+                  <p className="mt-4 line-clamp-3 text-sm leading-relaxed text-text-secondary">
                     {hero.synopsis}
                   </p>
                 )}
                 {hero.genres.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     {hero.genres.map((genre) => (
                       <span
                         key={genre}
-                        className="rounded-full border border-border bg-surface/70 px-2 py-0.5 font-mono text-[11px] text-text-secondary"
+                        className="rounded-full border border-border bg-surface/70 px-2.5 py-1 font-mono text-[11px] text-text-secondary"
                       >
                         {genre}
                       </span>
@@ -128,7 +129,7 @@ export default function AnimeView({
                 )}
                 <Button
                   variant="primary"
-                  className="mt-4 px-5 py-2.5"
+                  className="mt-6 px-5 py-2.5"
                   onClick={() => router.push(`/watch/${hero.episodeId}`)}
                 >
                   <Play className="mr-2 inline h-4 w-4" fill="currentColor" strokeWidth={0} aria-hidden />
