@@ -42,25 +42,37 @@ export class DownloadStatusService {
       series.map((s) => [s.id, s]),
     );
 
-    const bySeries = new Map<number, { state: string; downloadClient: string | null; error: string | null }>();
+    const bySeries = new Map<number, {
+      state: string;
+      downloadClient: string | null;
+      error: string | null;
+    }[]>();
     for (const record of queue as {
       seriesId?: number;
       status?: string;
       trackedDownloadState?: string;
       errorMessage?: string | null;
       downloadClient?: string | null;
+      episodeHasFile?: boolean;
     }[]) {
       if (record.seriesId == null) continue;
+      // Sonarr can leave an old qBittorrent warning in the queue after the
+      // episode has already been imported. The file flag is authoritative;
+      // imported records must not keep a false "missing files" warning alive.
+      if (record.episodeHasFile === true) continue;
       const state = record.trackedDownloadState ?? record.status ?? "unknown";
-      bySeries.set(record.seriesId, {
+      const records = bySeries.get(record.seriesId) ?? [];
+      records.push({
         state,
         downloadClient: record.downloadClient ?? null,
         error: record.errorMessage ?? null,
       });
+      bySeries.set(record.seriesId, records);
     }
 
     const items: DownloadItem[] = [];
-    for (const [seriesId, queueInfo] of bySeries) {
+    for (const [seriesId, queueRecords] of bySeries) {
+      const queueInfo = queueRecords[queueRecords.length - 1]!;
       const anime = animeBySonarrId.get(seriesId);
       const sonarrSeries = seriesById.get(seriesId);
       if (!anime) continue;

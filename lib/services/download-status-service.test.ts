@@ -11,6 +11,7 @@ interface QueueRecord {
   trackedDownloadState: string;
   errorMessage: string | null;
   downloadClient: string | null;
+  episodeHasFile?: boolean;
 }
 
 function makeSeries(overrides: Partial<SonarrSeries> = {}): SonarrSeries {
@@ -181,6 +182,32 @@ describe("DownloadStatusService.getDownloadStatus", () => {
 
     const items = await service.getDownloadStatus();
     expect(items[0]).toMatchObject({ state: "failed", error: "Download discarded" });
+  });
+
+  it("hides stale queue warnings after Sonarr confirms the episode has a file", async () => {
+    seedAnime(db);
+    service = new DownloadStatusService(
+      db,
+      fakeSonarr({
+        queue: [makeQueueRecord({ errorMessage: "qBittorrent is reporting missing files", episodeHasFile: true })],
+        series: [makeSeries({ episodeFileCount: 12, monitoredEpisodesTotal: 12 })],
+      }),
+    );
+
+    expect(await service.getDownloadStatus()).toEqual([]);
+  });
+
+  it("keeps warnings for queue records that still have no imported file", async () => {
+    seedAnime(db);
+    service = new DownloadStatusService(
+      db,
+      fakeSonarr({
+        queue: [makeQueueRecord({ errorMessage: "qBittorrent is reporting missing files", episodeHasFile: false })],
+        series: [makeSeries()],
+      }),
+    );
+
+    expect((await service.getDownloadStatus())[0]!.error).toBe("qBittorrent is reporting missing files");
   });
 
   it("reports 100 percent when all monitored episodes are downloaded", async () => {
