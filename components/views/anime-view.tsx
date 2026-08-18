@@ -83,7 +83,7 @@ export default function AnimeView({
             <p className="font-mono text-[11px] font-medium uppercase leading-[14px] tracking-[0.2em] text-accent">
               Now watching
             </p>
-            <h2 className="mt-2 text-3xl font-semibold leading-[38px] text-text-primary lg:text-4xl lg:leading-[48px]">
+            <h2 className="mt-3 text-3xl font-semibold leading-none text-text-primary lg:text-4xl">
               {hero.animeTitle}
             </h2>
             <p className="mt-2 text-sm leading-[20px]">
