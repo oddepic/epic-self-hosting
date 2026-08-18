@@ -80,13 +80,13 @@ export default function AnimeView({
           />
           <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(13,11,18,0.95),rgba(13,11,18,0.4)_50%,transparent)]" />
           <div className="absolute inset-x-0 bottom-0 max-w-2xl p-8 lg:p-12">
-            <p className="font-mono text-[11px] font-medium uppercase tracking-[0.2em] text-accent">
+            <p className="font-mono text-[11px] font-medium uppercase leading-none tracking-[0.2em] text-accent">
               Now watching
             </p>
-            <h2 className="mt-1 text-3xl font-semibold text-text-primary lg:text-4xl">
+            <h2 className="mt-1 text-3xl font-semibold leading-none text-text-primary lg:text-4xl">
               {hero.animeTitle}
             </h2>
-            <p className="mt-1 text-sm">
+            <p className="mt-1 text-sm leading-tight">
               <span className="font-mono text-text-secondary">{hero.label}</span>
               {hero.episodeTitle && (
                 <>
