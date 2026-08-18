@@ -11,6 +11,8 @@ export interface ContinueWatchingItem {
   coverImageUrl: string | null;
   backdropUrl: string | null;
   logoUrl: string | null;
+  synopsis: string | null;
+  genres: string[];
   seasonNumber: number;
   episodeNumber: number;
   episodeTitle: string | null;
@@ -71,6 +73,8 @@ export class DashboardService {
       coverImageUrl: animes.coverImageUrl,
       jellyfinId: animes.jellyfinId,
       lastWatchedAt: animes.lastWatchedAt,
+      synopsis: animes.synopsis,
+      genres: animes.genres,
       seasonNumber: seasons.number,
       episodeNumber: episodes.episodeNumber,
       episodeTitle: episodes.title,
@@ -124,6 +128,8 @@ export class DashboardService {
       logoUrl: row.jellyfinId && this.options.jellyfinUrl
         ? `${this.options.jellyfinUrl}/Items/${row.jellyfinId}/Images/Logo?maxWidth=600`
         : null,
+      synopsis: row.synopsis,
+      genres: row.genres ?? [],
       seasonNumber: row.seasonNumber,
       episodeNumber: row.episodeNumber,
       episodeTitle: row.episodeTitle,

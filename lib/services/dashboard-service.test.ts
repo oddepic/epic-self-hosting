@@ -139,6 +139,22 @@ describe("DashboardService", () => {
       expect(service.getContinueWatching()).toHaveLength(1);
     });
 
+    it("exposes synopsis and genres for the hero", () => {
+      const animeId = seedAnime(db, {
+        lastWatchedAt: 700,
+        synopsis: "A hero's journey begins.",
+        genres: ["Action", "Drama"],
+      });
+      seedEpisode(db, animeId, 1, 1, { progressSeconds: 100 });
+
+      const items = service.getContinueWatching();
+
+      expect(items[0]).toMatchObject({
+        synopsis: "A hero's journey begins.",
+        genres: ["Action", "Drama"],
+      });
+    });
+
     it("offers the next unwatched episode after finishing the previous one", () => {
       const animeId = seedAnime(db, { lastWatchedAt: 800 });
       seedEpisode(db, animeId, 1, 1, { watched: true, progressSeconds: 1420 });
