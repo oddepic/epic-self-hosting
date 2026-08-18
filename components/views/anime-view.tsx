@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Play } from "lucide-react";
 import Button from "@/components/ui/button";
 import Skeleton from "@/components/ui/skeleton";
 import MediaCard, { MediaRow } from "@/components/media/media-card";
+import { usePlayer } from "@/components/player/player-provider";
 import type {
   ContinueWatchingItem,
   UpcomingItem,
@@ -27,7 +27,7 @@ export default function AnimeView({
   onOpenAnime: (animeId: number) => void;
   refreshSignal?: number;
 }) {
-  const router = useRouter();
+  const { play } = usePlayer();
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [watching, setWatching] = useState<WatchingItem[]>([]);
   const [upcoming, setUpcoming] = useState<UpcomingItem[]>([]);
@@ -98,7 +98,7 @@ export default function AnimeView({
             <Button
               variant="primary"
               className="mt-3.5 px-5 py-2.5"
-              onClick={() => router.push(`/watch/${hero.episodeId}`)}
+              onClick={() => void play(hero.episodeId)}
             >
               <Play className="mr-2 inline h-4 w-4" fill="currentColor" strokeWidth={0} aria-hidden />
               {hero.progressSeconds > 0
@@ -123,7 +123,7 @@ export default function AnimeView({
               title={item.animeTitle}
               subtitle={item.episodeTitle ? `${item.label} · ${item.episodeTitle}` : item.label}
               progress={item.durationSeconds ? (item.progressSeconds / item.durationSeconds) * 100 : null}
-              onClick={() => router.push(`/watch/${item.episodeId}`)}
+              onClick={() => void play(item.episodeId)}
             />
           ))}
         </MediaRow>

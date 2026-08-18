@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward, Volume1, Volume2, VolumeX, X } from "lucide-react";
 import { usePlayerEngine, type PlaybackStart, type PlayerState } from "./use-player-engine";
@@ -45,7 +45,6 @@ function saveTrackPreference(body: Record<string, unknown>): void {
 }
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const pathname = usePathname();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
@@ -71,43 +70,60 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, [pathname]);
 
+  // The engine calls this on episode end; it needs `play`, which the engine
+  // itself provides — bridge via a ref (same pattern the engine uses).
+  const playRef = useRef<(episodeId: number, resume?: boolean) => Promise<void>>(async () => {});
   const onAutoAdvance = useMemo(
     () => (episodeId: number): boolean => {
       if (!autoplayNext) return false;
-      router.replace(`/watch/${episodeId}`);
+      // Auto-next plays the next episode in place — the big player stays big
+      // and the stream swaps without leaving home.
+      void playRef.current(episodeId);
       return true;
     },
-    [router, autoplayNext],
+    [autoplayNext],
   );
 
-  const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef });
-  const isWatchRoute = (pathname ?? "").startsWith("/watch/");
+  const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({
+    onAutoAdvance,
+    videoRef,
+  });
 
-  // Expanding from the mini player is a pure layout change: the same video
-  // element keeps playing (no re-resolve, no resume reload). Reset whenever
-  // a new playback starts or the player is dismissed, so only the mini
-  // player's own expand button turns it on.
-  const [forcedBig, setForcedBig] = useState(false);
+  useEffect(() => {
+    playRef.current = play;
+  }, [play]);
+
+  // The player lives on the home page now (no /watch route): "big" is a
+  // pure client-side view state. UI-triggered playback expands it; the mini
+  // player's own expand button does the same without touching the stream.
+  const [playerView, setPlayerView] = useState<"big" | "mini">("mini");
 
   const wrappedPlay = useCallback(
     async (episodeId: number, resume?: boolean) => {
-      setForcedBig(false);
+      setPlayerView("big");
       return play(episodeId, resume);
     },
     [play],
   );
 
-  const mode: PlayerContextValue["mode"] = isWatchRoute
-    ? "big"
-    : state.status !== "idle" && state.session != null
-      ? forcedBig
-        ? "big"
-        : "mini"
-      : "hidden";
+  const mode: PlayerContextValue["mode"] =
+    state.status !== "idle" && state.session != null ? playerView : "hidden";
   const value = useMemo<PlayerContextValue>(
     () => ({ videoRef, state, play: wrappedPlay, close, setAudio, setSubtitle, session: state.session, mode }),
     [videoRef, state, wrappedPlay, close, setAudio, setSubtitle, mode],
   );
+
+  // Big mode covers the page: lock the background scroll so the scrollbar
+  // disappears and the player feels maximized.
+  useEffect(() => {
+    if (mode === "big") {
+      const previous = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = previous;
+      };
+    }
+  }, [mode]);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -386,15 +402,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         toggleMute();
       } else if (e.key === "Escape" && !document.fullscreenElement) {
         // In fullscreen the browser owns Escape (exits fullscreen); outside
-        // it, Escape does the same as the back arrow: back to home.
+        // it, Escape minimizes the big player back to mini.
         e.preventDefault();
-        setForcedBig(false);
-        router.push("/");
+        setPlayerView("mini");
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, skip, togglePlay, skipSeconds, router, toggleFullscreen, toggleMute]);
+  }, [mode, skip, togglePlay, skipSeconds, toggleFullscreen, toggleMute]);
 
   return (
     <PlayerContext.Provider value={value}>
@@ -461,11 +476,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               }}
             >
               <button
-                onClick={() => {
-                  setForcedBig(false);
-                  router.push("/");
-                }}
-                aria-label="Back"
+                onClick={() => setPlayerView("mini")}
+                aria-label="Minimize"
                 className="rounded-lg p-2 text-text-primary transition-colors hover:bg-surface-hover"
               >
                 <ArrowLeft className="h-5 w-5" aria-hidden />
@@ -511,7 +523,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           {mode === "big" && continueEpisode && (
             <div className="absolute bottom-24 right-6">
               <button
-                onClick={() => router.replace(`/watch/${continueEpisode.episodeId}`)}
+                onClick={() => void play(continueEpisode.episodeId)}
                 className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
               >
                 <SkipForward className="mr-1.5 inline h-4 w-4" aria-hidden />
@@ -750,7 +762,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               )}
             </button>
             <button
-              onClick={() => setForcedBig(true)}
+              onClick={() => setPlayerView("big")}
               className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-surface-hover"
             >
               <Maximize className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden />

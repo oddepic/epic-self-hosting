@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Check, CheckCheck, Play, X } from "lucide-react";
 import Button from "@/components/ui/button";
+import { usePlayer } from "@/components/player/player-provider";
 import type { AnimeDetail } from "@/lib/services/anime-detail-service";
 import type { SearchItem } from "@/lib/services/search-service";
 import type { MonitorOption, SonarrCandidate } from "@/lib/integrations/types";
@@ -63,7 +63,7 @@ interface Props {
 }
 
 export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: Props) {
-  const router = useRouter();
+  const { play } = usePlayer();
   const [detail, setDetail] = useState<AnimeDetail | null>(null);
   const [progressInput, setProgressInput] = useState("");
   // Start from the persisted season (if any) so the very first fetch already
@@ -430,7 +430,10 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
               {primary && (
                 <Button
                   variant="primary"
-                  onClick={() => router.push(`/watch/${primary.episodeId}`)}
+                  onClick={() => {
+                    onClose();
+                    void play(primary.episodeId);
+                  }}
                 >
                   <Play className="mr-2 inline h-4 w-4" fill="currentColor" strokeWidth={0} aria-hidden />
                   {detail!.resume ? `Resume EP ${primary.episodeNumber}` : `Start EP ${primary.episodeNumber}`}
@@ -650,7 +653,10 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                       episode.available ? "cursor-pointer transition-colors hover:bg-surface-hover" : ""
                     }`}
                     onClick={() => {
-                      if (episode.available) router.push(`/watch/${episode.id}`);
+                      if (episode.available) {
+                        onClose();
+                        void play(episode.id);
+                      }
                     }}
                   >
                     {episode.thumbnailUrl ? (
