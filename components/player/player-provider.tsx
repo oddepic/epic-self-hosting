@@ -83,14 +83,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef });
   const isWatchRoute = (pathname ?? "").startsWith("/watch/");
 
+  // Expanding from the mini player is a pure layout change: the same video
+  // element keeps playing (no re-resolve, no resume reload). Reset whenever
+  // a new playback starts or the player is dismissed, so only the mini
+  // player's own expand button turns it on.
+  const [forcedBig, setForcedBig] = useState(false);
+
+  const wrappedPlay = useCallback(
+    async (episodeId: number, resume?: boolean) => {
+      setForcedBig(false);
+      return play(episodeId, resume);
+    },
+    [play],
+  );
+
   const mode: PlayerContextValue["mode"] = isWatchRoute
     ? "big"
     : state.status !== "idle" && state.session != null
-      ? "mini"
+      ? forcedBig
+        ? "big"
+        : "mini"
       : "hidden";
   const value = useMemo<PlayerContextValue>(
-    () => ({ videoRef, state, play, close, setAudio, setSubtitle, session: state.session, mode }),
-    [videoRef, state, play, close, setAudio, setSubtitle, mode],
+    () => ({ videoRef, state, play: wrappedPlay, close, setAudio, setSubtitle, session: state.session, mode }),
+    [videoRef, state, wrappedPlay, close, setAudio, setSubtitle, mode],
   );
 
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -372,6 +388,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         // In fullscreen the browser owns Escape (exits fullscreen); outside
         // it, Escape does the same as the back arrow: back to home.
         e.preventDefault();
+        setForcedBig(false);
         router.push("/");
       }
     };
@@ -444,7 +461,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               }}
             >
               <button
-                onClick={() => router.push("/")}
+                onClick={() => {
+                  setForcedBig(false);
+                  router.push("/");
+                }}
                 aria-label="Back"
                 className="rounded-lg p-2 text-text-primary transition-colors hover:bg-surface-hover"
               >
@@ -730,7 +750,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               )}
             </button>
             <button
-              onClick={() => router.push(`/watch/${state.session!.episodeId}`)}
+              onClick={() => setForcedBig(true)}
               className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-surface-hover"
             >
               <Maximize className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden />
