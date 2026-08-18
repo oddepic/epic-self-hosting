@@ -86,15 +86,14 @@ export default function AnimeView({
               Now watching
             </p>
             <div className="absolute inset-x-0 bottom-0 pb-8 lg:pb-12">
-              {/* 60ch is the max width for every piece of hero content. */}
-              <div className="max-w-[60ch] px-8 lg:px-12">
+              {/* 50ch is the max width for every piece of hero content. */}
+              <div className="max-w-[50ch] px-8 lg:px-12">
                 {heroLogo ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={heroLogo}
                     alt={hero.animeTitle}
-                    className="drop-shadow-lg"
-                    style={{ height: "5rem" }}
+                    className="h-auto max-h-24 w-full object-contain object-left drop-shadow-lg"
                   />
                 ) : (
                   <h2 className="text-3xl font-semibold text-text-primary lg:text-4xl">
