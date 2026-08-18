@@ -55,7 +55,7 @@ export class MalImportService {
 
     this.db.transaction((tx) => {
       for (const { entry, animeId } of matched) {
-        tx.update(animes).set({ status: entry.status, score: entry.score, updatedAt: this.now() }).where(eq(animes.id, animeId)).run();
+        tx.update(animes).set({ status: entry.status, score: entry.score, watchedEpisodes: entry.watchedEpisodes, updatedAt: this.now() }).where(eq(animes.id, animeId)).run();
         updated++;
       }
 
@@ -64,7 +64,7 @@ export class MalImportService {
         if (metadata) {
           const byAniListId = tx.select().from(animes).where(eq(animes.anilistId, metadata.id)).get();
           if (byAniListId) {
-            tx.update(animes).set({ status: entry.status, malId: entry.animeId, score: entry.score, updatedAt: this.now() }).where(eq(animes.id, byAniListId.id)).run();
+            tx.update(animes).set({ status: entry.status, malId: entry.animeId, score: entry.score, watchedEpisodes: entry.watchedEpisodes, updatedAt: this.now() }).where(eq(animes.id, byAniListId.id)).run();
             updated++;
           } else {
             const now = this.now();
@@ -87,6 +87,7 @@ export class MalImportService {
                 nextEpisodeAt: metadata.nextEpisodeAt,
                 status: entry.status,
                 score: entry.score,
+                watchedEpisodes: entry.watchedEpisodes,
                 createdAt: now,
                 updatedAt: now,
               })

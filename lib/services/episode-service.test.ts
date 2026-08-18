@@ -61,6 +61,17 @@ describe("completeEpisode", () => {
     episode = db.select().from(episodes).where(eq(episodes.id, episodeId)).get();
     expect(episode!.durationSeconds).toBe(1500);
   });
+
+  it("bumps the entry watched counter once per newly watched episode", () => {
+    const anime = db.select().from(animes).where(eq(animes.id, 1)).get();
+    completeEpisode(db, { episodeId, userId, positionSeconds: 100, now: () => 1 });
+    completeEpisode(db, { episodeId, userId, positionSeconds: 100, now: () => 2 });
+    expect(db.select().from(animes).where(eq(animes.id, 1)).get()!.watchedEpisodes).toBe(1);
+
+    unwatchEpisode(db, { episodeId });
+    expect(db.select().from(animes).where(eq(animes.id, 1)).get()!.watchedEpisodes).toBe(0);
+    expect(anime!.watchedEpisodes).toBe(0);
+  });
 });
 
 describe("completeEpisodeThrough", () => {

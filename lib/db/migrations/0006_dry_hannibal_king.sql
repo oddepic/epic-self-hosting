@@ -1,0 +1,1 @@
+ALTER TABLE `animes` ADD `watched_episodes` integer DEFAULT 0 NOT NULL;

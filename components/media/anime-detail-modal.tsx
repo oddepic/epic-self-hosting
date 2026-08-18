@@ -146,13 +146,13 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   const newAnime = animeId == null ? item : null;
   const anime = detail?.anime ?? null;
 
-  // Progress (watched episode count) for the season being viewed, editable
-  // next to the status when the anime is in progress.
-  const selectedSeasonNumber = season ?? detail?.resume?.seasonNumber ?? detail?.seasons[0]?.number ?? null;
-  const seasonSummary = detail?.seasons.find((s) => s.number === selectedSeasonNumber) ?? null;
+  // Progress (watched episodes) for the MAL entry, editable next to the
+  // status. MAL counts across ALL seasons of a single entry (One Piece,
+  // Naruto…), so this is the anime's entry-level counter — not the viewed
+  // season's flag count.
   const seasonEpisodes = detail?.episodes ?? [];
-  const progressCount = seasonSummary?.watchedCount ?? 0;
-  const seasonTotal = seasonSummary?.totalCount ?? 0;
+  const progressCount = anime?.watchedEpisodes ?? 0;
+  const entryTotal = anime?.episodeCount ?? null;
   const nextUnwatched = seasonEpisodes.find((e) => !e.watched) ?? null;
   const showProgress =
     anime != null && !newAnime && anime.status !== "completed" && anime.status !== "plan_to_watch";
@@ -356,25 +356,29 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   const addPhase = addState?.phase ?? derivedAddPhase;
 
   async function onCommitProgress(value: string) {
+    if (animeId == null) return;
     const n = Math.round(Number(value));
-    if (!Number.isFinite(n) || n < 1 || seasonTotal === 0) {
+    if (!Number.isFinite(n) || n < 0) {
       setProgressInput(String(progressCount));
       return;
     }
-    const clamped = Math.min(n, seasonTotal);
-    const target = seasonEpisodes.find((e) => e.episodeNumber === clamped);
-    if (!target) {
-      setProgressInput(String(progressCount));
-      return;
-    }
+    const clamped = entryTotal != null ? Math.min(n, entryTotal) : Math.min(n, 99_999);
     if (clamped === progressCount) {
       setProgressInput(String(progressCount));
       return;
     }
+    // Sync the viewed season's flags up to the counter when the season has
+    // that many episodes; the counter itself is always set exactly.
+    const flagNumber = Math.min(clamped, seasonEpisodes.length);
+    const flagTarget = seasonEpisodes.find((e) => e.episodeNumber === flagNumber) ?? null;
     const res = await fetch("/api/episodes/set-watched", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ episodeId: target.id }),
+      body: JSON.stringify({
+        animeId,
+        watchedEpisodes: clamped,
+        ...(flagTarget ? { episodeId: flagTarget.id } : {}),
+      }),
     });
     if (res.ok) {
       void load();
@@ -477,15 +481,15 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                       </option>
                     ))}
                   </select>
-                  {showProgress && seasonTotal > 0 && (
+                  {showProgress && (
                     <>
                       <span className="text-text-muted/60" aria-hidden>|</span>
                       <div className="flex items-center gap-1">
                         <div className="flex items-center rounded-lg border border-border bg-surface-raised px-2 py-1.5">
                           <input
                             type="number"
-                            min={1}
-                            max={seasonTotal}
+                            min={0}
+                            max={entryTotal ?? 99_999}
                             value={progressInput}
                             onChange={(e) => setProgressInput(e.target.value)}
                             onBlur={(e) => void onCommitProgress(e.target.value)}
@@ -500,9 +504,11 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                             }}
                             className="min-w-8 bg-transparent text-right font-mono text-xs text-text-primary outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
-                          <span className="ml-0.5 shrink-0 font-mono text-xs text-text-muted">
-                            / {seasonTotal}
-                          </span>
+                          {entryTotal != null && (
+                            <span className="ml-0.5 shrink-0 font-mono text-xs text-text-muted">
+                              / {entryTotal}
+                            </span>
+                          )}
                         </div>
                         <button
                           onClick={() => void onMarkNext()}

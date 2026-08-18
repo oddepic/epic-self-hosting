@@ -121,8 +121,8 @@ describe("MalSyncService", () => {
   });
 
   describe("pushStatus", () => {
-    it("pushes the current status and locally counted watched episodes", async () => {
-      const { animeId, userId } = seedAnime(db, { score: 8 });
+    it("pushes the current status and the stored entry counter", async () => {
+      const { animeId, userId } = seedAnime(db, { score: 8, watchedEpisodes: 2 });
       seedEpisodes(db, animeId, [true, false, true]);
       db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
       const mal = fakeMal();
@@ -204,22 +204,22 @@ describe("MalSyncService", () => {
   });
 
   describe("pushEpisodeCompletion", () => {
-    it("pushes the incremented watched count", async () => {
-      const { animeId, userId } = seedAnime(db);
-      const [ep1] = seedEpisodes(db, animeId, [true, false, false]);
+    it("pushes the stored entry counter", async () => {
+      const { animeId, userId } = seedAnime(db, { watchedEpisodes: 5 });
+      seedEpisodes(db, animeId, [true, false, false]);
       db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
       const mal = fakeMal();
       const service = makeService(db, mal);
 
-      await service.pushEpisodeCompletion(userId, ep1);
+      await service.pushEpisodeCompletion(userId, 1);
 
       expect(mal.updateCalls).toEqual([
-        { animeId: 12345, status: "watching", watchedEpisodes: 1, score: null },
+        { animeId: 12345, status: "watching", watchedEpisodes: 5, score: null },
       ]);
     });
 
-    it("auto-completes on MAL when every episode is watched", async () => {
-      const { animeId, userId } = seedAnime(db);
+    it("auto-completes on MAL when the counter reaches the episode count", async () => {
+      const { animeId, userId } = seedAnime(db, { watchedEpisodes: 3, episodeCount: 3 });
       const eps = seedEpisodes(db, animeId, [true, true, true]);
       db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
       const mal = fakeMal();
@@ -233,7 +233,7 @@ describe("MalSyncService", () => {
     });
 
     it("does not auto-complete a dropped anime", async () => {
-      const { animeId, userId } = seedAnime(db, { status: "dropped" });
+      const { animeId, userId } = seedAnime(db, { status: "dropped", watchedEpisodes: 3, episodeCount: 3 });
       const eps = seedEpisodes(db, animeId, [true, true, true]);
       db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
       const mal = fakeMal();
@@ -246,41 +246,17 @@ describe("MalSyncService", () => {
       ]);
     });
 
-    it("ignores specials (season 0) in the count and the total", async () => {
-      const { animeId, userId } = seedAnime(db);
-      const [ep1] = seedEpisodes(db, animeId, [true, false]);
-      const specials = db.insert(seasons).values({ animeId, number: 0 }).returning().get();
-      db.insert(episodes).values({ seasonId: specials.id, episodeNumber: 1, watched: true, progressSeconds: 0 }).run();
-      db.insert(episodes).values({ seasonId: specials.id, episodeNumber: 2, watched: true, progressSeconds: 0 }).run();
+    it("does not complete when the total episode count is unknown", async () => {
+      const { animeId, userId } = seedAnime(db, { watchedEpisodes: 3, episodeCount: null });
+      const eps = seedEpisodes(db, animeId, [true, true, true]);
       db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
       const mal = fakeMal();
       const service = makeService(db, mal);
 
-      await service.pushEpisodeCompletion(userId, ep1);
+      await service.pushEpisodeCompletion(userId, eps[eps.length - 1]);
 
       expect(mal.updateCalls).toEqual([
-        { animeId: 12345, status: "watching", watchedEpisodes: 1, score: null },
-      ]);
-    });
-
-    it("counts only the action season when the row overhangs its MAL entry", async () => {
-      const { animeId, userId } = seedAnime(db, { episodeCount: 2 });
-      seedEpisodes(db, animeId, [true, true]);
-      const season2 = db.insert(seasons).values({ animeId, number: 2 }).returning().get();
-      const s2e1 = db
-        .insert(episodes)
-        .values({ seasonId: season2.id, episodeNumber: 1, watched: true, progressSeconds: 0 })
-        .returning()
-        .get();
-      db.insert(episodes).values({ seasonId: season2.id, episodeNumber: 2, watched: false, progressSeconds: 0 }).run();
-      db.insert(malTokens).values({ userId, ...TOKEN, updatedAt: 1 }).run();
-      const mal = fakeMal();
-      const service = makeService(db, mal);
-
-      await service.pushEpisodeCompletion(userId, s2e1.id);
-
-      expect(mal.updateCalls).toEqual([
-        { animeId: 12345, status: "watching", watchedEpisodes: 1, score: null },
+        { animeId: 12345, status: "watching", watchedEpisodes: 3, score: null },
       ]);
     });
   });

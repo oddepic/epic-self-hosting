@@ -49,6 +49,7 @@ export const animes = sqliteTable("animes", {
   genres: text("genres", { mode: "json" }).$type<string[]>().notNull().default([]),
   status: text("status").$type<typeof userStatus[number]>().notNull().default("plan_to_watch"),
   score: integer("score"),
+  watchedEpisodes: integer("watched_episodes").notNull().default(0),
   format: text("format"),
   seasonYear: integer("season_year"),
   episodeCount: integer("episode_count"),

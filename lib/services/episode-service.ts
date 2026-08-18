@@ -1,9 +1,25 @@
 import { and, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { episodes, playbackHistory, seasons } from "../db/schema";
+import { animes, episodes, playbackHistory, seasons } from "../db/schema";
 
 export function formatEpisodeLabel(seasonNumber: number, episodeNumber: number): string {
   return `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
+}
+
+// Entry-level watched counter: MAL counts episodes across ALL seasons of a
+// single entry (One Piece, Naruto…), so the per-season flags alone can't
+// drive the MAL progress. The anime row's watchedEpisodes is the source of
+// truth; every flag mutation adjusts it by the delta of newly/removed marks.
+function bumpWatchedCounter(db: Db, animeId: number, delta: number): void {
+  const anime = db.select().from(animes).where(eq(animes.id, animeId)).get();
+  if (!anime) return;
+  const next = Math.max(0, anime.watchedEpisodes + delta);
+  db.update(animes).set({ watchedEpisodes: next }).where(eq(animes.id, animeId)).run();
+}
+
+function animeIdOfEpisode(db: Db, episode: typeof episodes.$inferSelect): number | null {
+  const season = db.select().from(seasons).where(eq(seasons.id, episode.seasonId)).get();
+  return season?.animeId ?? null;
 }
 
 export interface CompleteEpisodeThroughInput {
@@ -15,12 +31,15 @@ export interface CompleteEpisodeThroughInput {
 export function unwatchEpisode(db: Db, input: { episodeId: number }): void {
   const episode = db.select().from(episodes).where(eq(episodes.id, input.episodeId)).get();
   if (!episode) return;
+  const animeId = animeIdOfEpisode(db, episode);
+  const wasWatched = episode.watched;
   db.transaction((tx) => {
     tx.update(episodes).set({ watched: false, progressSeconds: 0 }).where(eq(episodes.id, episode.id)).run();
     tx.delete(playbackHistory)
       .where(and(eq(playbackHistory.episodeId, episode.id), eq(playbackHistory.completed, true)))
       .run();
   });
+  if (wasWatched && animeId != null) bumpWatchedCounter(db, animeId, -1);
 }
 
 export function unwatchThrough(db: Db, input: { episodeId: number }): number {
@@ -56,6 +75,7 @@ export function unwatchThrough(db: Db, input: { episodeId: number }): number {
       unmarked++;
     }
   });
+  if (unmarked > 0) bumpWatchedCounter(db, targetSeason.animeId, -unmarked);
   return unmarked;
 }
 
@@ -149,6 +169,10 @@ export interface CompleteEpisodeInput {
 }
 
 export function completeEpisode(db: Db, input: CompleteEpisodeInput): void {
+  const episode = db.select().from(episodes).where(eq(episodes.id, input.episodeId)).get();
+  if (!episode) return;
+  const animeId = animeIdOfEpisode(db, episode);
+  const alreadyWatched = episode.watched;
   const changes: Partial<typeof episodes.$inferInsert> = { watched: true, progressSeconds: 0 };
   if (input.durationSeconds != null) {
     changes.durationSeconds = input.durationSeconds;
@@ -161,4 +185,5 @@ export function completeEpisode(db: Db, input: CompleteEpisodeInput): void {
     positionSeconds: input.positionSeconds,
     completed: true,
   }).run();
+  if (!alreadyWatched && animeId != null) bumpWatchedCounter(db, animeId, 1);
 }
