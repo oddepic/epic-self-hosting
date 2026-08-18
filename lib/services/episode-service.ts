@@ -9,11 +9,26 @@ export function formatEpisodeLabel(seasonNumber: number, episodeNumber: number):
 // Entry-level watched counter: MAL counts episodes across ALL seasons of a
 // single entry (One Piece, Naruto…), so the per-season flags alone can't
 // drive the MAL progress. The anime row's watchedEpisodes is the source of
-// truth; every flag mutation adjusts it by the delta of newly/removed marks.
-function bumpWatchedCounter(db: Db, animeId: number, delta: number): void {
+// truth. When an episode carries an absolute number (its sequential position
+// in the whole series, e.g. One Piece S23E01 = 1156), marking it watched
+// jumps the counter to that position — because having watched the 1156th
+// episode means at least 1156 episodes are seen. For season-scoped entries
+// (Re:ZERO 4th Season: entry total 19, absolute 67+) the absolute scale
+// doesn't match the entry, so a plain +1 is used instead.
+function bumpWatchedCounter(
+  db: Db,
+  animeId: number,
+  episode: typeof episodes.$inferSelect | undefined,
+  delta = 1,
+): void {
   const anime = db.select().from(animes).where(eq(animes.id, animeId)).get();
   if (!anime) return;
-  const next = Math.max(0, anime.watchedEpisodes + delta);
+  const absolute = episode?.absoluteNumber ?? null;
+  const useAbsolute =
+    delta > 0 && absolute != null && (anime.episodeCount == null || absolute <= anime.episodeCount);
+  const next = useAbsolute
+    ? Math.max(anime.watchedEpisodes, absolute)
+    : Math.max(0, anime.watchedEpisodes + delta);
   db.update(animes).set({ watchedEpisodes: next }).where(eq(animes.id, animeId)).run();
 }
 
@@ -39,7 +54,7 @@ export function unwatchEpisode(db: Db, input: { episodeId: number }): void {
       .where(and(eq(playbackHistory.episodeId, episode.id), eq(playbackHistory.completed, true)))
       .run();
   });
-  if (wasWatched && animeId != null) bumpWatchedCounter(db, animeId, -1);
+  if (wasWatched && animeId != null) bumpWatchedCounter(db, animeId, episode, -1);
 }
 
 export function unwatchThrough(db: Db, input: { episodeId: number }): number {
@@ -75,7 +90,7 @@ export function unwatchThrough(db: Db, input: { episodeId: number }): number {
       unmarked++;
     }
   });
-  if (unmarked > 0) bumpWatchedCounter(db, targetSeason.animeId, -unmarked);
+  if (unmarked > 0) bumpWatchedCounter(db, targetSeason.animeId, undefined, -unmarked);
   return unmarked;
 }
 
@@ -185,5 +200,5 @@ export function completeEpisode(db: Db, input: CompleteEpisodeInput): void {
     positionSeconds: input.positionSeconds,
     completed: true,
   }).run();
-  if (!alreadyWatched && animeId != null) bumpWatchedCounter(db, animeId, 1);
+  if (!alreadyWatched && animeId != null) bumpWatchedCounter(db, animeId, episode);
 }

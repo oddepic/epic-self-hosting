@@ -72,6 +72,52 @@ describe("completeEpisode", () => {
     expect(db.select().from(animes).where(eq(animes.id, 1)).get()!.watchedEpisodes).toBe(0);
     expect(anime!.watchedEpisodes).toBe(0);
   });
+
+  it("jumps the counter to the absolute number on long-running entries", () => {
+    // One Piece-style: entry total unknown, S23E01 = episode 1156.
+    const animeId = db.insert(animes).values({
+      anilistId: 999_001,
+      titleRomaji: "Long Runner",
+      status: "watching",
+      episodeCount: null,
+      createdAt: 1,
+      updatedAt: 1,
+    }).returning().get().id;
+    const season = db.insert(seasons).values({ animeId, number: 23 }).returning().get();
+    const ep = db.insert(episodes).values({
+      seasonId: season.id,
+      episodeNumber: 1,
+      absoluteNumber: 1156,
+      progressSeconds: 0,
+    }).returning().get();
+
+    completeEpisode(db, { episodeId: ep.id, userId, positionSeconds: 100, now: () => 1 });
+
+    expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(1156);
+  });
+
+  it("keeps +1 on season-scoped entries whose absolute numbers exceed the total", () => {
+    // Re:ZERO 4th Season-style: entry total 19, S4E02 absolute 68.
+    const animeId = db.insert(animes).values({
+      anilistId: 999_002,
+      titleRomaji: "Scoped Entry",
+      status: "watching",
+      episodeCount: 19,
+      createdAt: 1,
+      updatedAt: 1,
+    }).returning().get().id;
+    const season = db.insert(seasons).values({ animeId, number: 4 }).returning().get();
+    const ep = db.insert(episodes).values({
+      seasonId: season.id,
+      episodeNumber: 2,
+      absoluteNumber: 68,
+      progressSeconds: 0,
+    }).returning().get();
+
+    completeEpisode(db, { episodeId: ep.id, userId, positionSeconds: 100, now: () => 1 });
+
+    expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(1);
+  });
 });
 
 describe("completeEpisodeThrough", () => {
