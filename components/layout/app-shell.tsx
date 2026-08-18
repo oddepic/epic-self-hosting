@@ -29,7 +29,6 @@ export default function AppShell({ active, onNavigate, onRefresh, refreshing, re
               <span className="text-xs text-success transition-opacity">Refreshed</span>
             )}
           </div>
-          <p className="text-xs text-text-muted">Library footprint, downloads & anime tracking</p>
         </div>
         <Navigation active={active} onNavigate={onNavigate} />
       </header>
