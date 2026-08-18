@@ -106,6 +106,7 @@ describe("DashboardService", () => {
         label: "S01E01",
         episodeTitle: "Episode 1",
         backdropUrl: "http://jellyfin:8096/Items/jf-b/Images/Backdrop?maxWidth=1920&quality=90",
+        logoUrl: "http://jellyfin:8096/Items/jf-b/Images/Logo?maxWidth=600",
       });
     });
 

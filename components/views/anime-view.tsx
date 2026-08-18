@@ -59,12 +59,13 @@ export default function AnimeView({
 
   const hero = continueWatching[0] ?? null;
   const heroBackground = hero?.backdropUrl ?? hero?.coverImageUrl ?? null;
+  const heroLogo = hero?.logoUrl ?? null;
 
   return (
     <div>
       {!loaded ? (
         <div>
-          <Skeleton className="h-[400px] w-full rounded-2xl" />
+          <Skeleton className="h-[70vh] min-h-[480px] w-full rounded-2xl" />
           <Skeleton className="mt-10 h-5 w-40" />
           <div className="mt-4 flex gap-4">
             {[0, 1, 2, 3, 4].map((i) => (
@@ -73,19 +74,29 @@ export default function AnimeView({
           </div>
         </div>
       ) : hero ? (
-        <div className="relative h-[400px] overflow-hidden rounded-2xl border border-border lg:h-[430px]">
+        <div className="relative h-[70vh] min-h-[480px] overflow-hidden rounded-2xl border border-border">
           <div
             className="absolute inset-0 bg-cover bg-no-repeat"
             style={heroBackground ? { backgroundImage: `url(${heroBackground})` } : undefined}
           />
           <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(13,11,18,0.95),rgba(13,11,18,0.4)_50%,transparent)]" />
-          <div className="absolute inset-x-0 bottom-0 max-w-2xl p-8 lg:p-12">
+          <div className="absolute inset-x-0 bottom-0 max-w-3xl p-8 lg:p-12">
             <p className="font-mono text-[11px] font-medium uppercase tracking-[0.2em] text-accent">
               Now watching
             </p>
-            <h2 className="mt-3 text-3xl font-semibold text-text-primary lg:text-4xl">
-              {hero.animeTitle}
-            </h2>
+            {heroLogo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={heroLogo}
+                alt={hero.animeTitle}
+                className="mt-3 h-14 max-w-full object-contain object-left drop-shadow-lg lg:h-16"
+                // Fixed height so any logo ratio renders consistently.
+              />
+            ) : (
+              <h2 className="mt-3 text-3xl font-semibold text-text-primary lg:text-4xl">
+                {hero.animeTitle}
+              </h2>
+            )}
             <p className="mt-1.5 text-sm">
               <span className="font-mono text-text-secondary">{hero.label}</span>
               {hero.episodeTitle && (

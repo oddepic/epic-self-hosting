@@ -10,6 +10,7 @@ export interface ContinueWatchingItem {
   animeTitle: string;
   coverImageUrl: string | null;
   backdropUrl: string | null;
+  logoUrl: string | null;
   seasonNumber: number;
   episodeNumber: number;
   episodeTitle: string | null;
@@ -119,6 +120,9 @@ export class DashboardService {
       coverImageUrl: row.coverImageUrl,
       backdropUrl: row.jellyfinId && this.options.jellyfinUrl
         ? `${this.options.jellyfinUrl}/Items/${row.jellyfinId}/Images/Backdrop?maxWidth=1920&quality=90`
+        : null,
+      logoUrl: row.jellyfinId && this.options.jellyfinUrl
+        ? `${this.options.jellyfinUrl}/Items/${row.jellyfinId}/Images/Logo?maxWidth=600`
         : null,
       seasonNumber: row.seasonNumber,
       episodeNumber: row.episodeNumber,
