@@ -31,7 +31,7 @@ export default function SonarrView({
   const [filter, setFilter] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
-  const [fixingId, setFixingId] = useState<number | null>(null);
+  const [fixingIds, setFixingIds] = useState<Set<number>>(new Set());
 
   const load = useCallback(async () => {
     setError(false);
@@ -62,17 +62,56 @@ export default function SonarrView({
     onMissingChange?.(library.some((row) => row.missingCount > 0));
   }, [library, onMissingChange]);
 
+  async function refreshLibraryRows(): Promise<SonarrLibraryRow[] | null> {
+    try {
+      const res = await fetch("/api/sonarr/library");
+      if (res.ok) {
+        const body = await res.json() as { overview: SonarrOverview; library: SonarrLibraryRow[] };
+        setOverview(body.overview);
+        setLibrary(body.library);
+        return body.library;
+      }
+    } catch {
+      // Keep the current rows; the next poll retries.
+    }
+    return null;
+  }
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // Sonarr runs episode searches sequentially, often taking ~20s each. Keep
+  // the row visibly "Searching…" until episodes stop being missing (grabbed)
+  // or the expected search window passes, so it never looks like it did
+  // nothing when it actually worked.
   async function fixSeries(seriesId: number) {
-    setFixingId(seriesId);
+    if (fixingIds.has(seriesId)) return;
+    setFixingIds((prev) => new Set(prev).add(seriesId));
     try {
       const res = await fetch("/api/sonarr/search-missing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seriesId }),
       });
-      if (res.ok) void load();
+      if (!res.ok) return;
+      const body = (await res.json()) as { searched?: number };
+      const searched = body.searched ?? 0;
+      if (searched === 0) return;
+
+      const windowMs = Math.max(60_000, searched * 30_000);
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < windowMs) {
+        const rows = await refreshLibraryRows();
+        const row = rows?.find((r) => r.id === seriesId);
+        // Episodes got grabbed and left the missing list — done.
+        if (row && row.missingCount < searched) return;
+        await sleep(4_000);
+      }
     } finally {
-      setFixingId(null);
+      setFixingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(seriesId);
+        return next;
+      });
     }
   }
 
@@ -172,12 +211,12 @@ export default function SonarrView({
                     {row.downloadStatus === "missing" && (
                       <button
                         onClick={() => void fixSeries(row.id)}
-                        disabled={fixingId === row.id}
+                        disabled={fixingIds.has(row.id)}
                         aria-label={`Search missing episodes for ${row.title}`}
-                        className="rounded-lg border border-border bg-surface px-2 py-1 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-lg border border-border bg-surface px-2 py-1 text-xs text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <Wrench className="mr-1 inline h-3.5 w-3.5" aria-hidden />
-                        {fixingId === row.id ? "Searching…" : "Fix"}
+                        {fixingIds.has(row.id) ? "Searching…" : "Fix"}
                       </button>
                     )}
                   </span>
