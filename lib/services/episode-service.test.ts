@@ -202,7 +202,6 @@ describe("completeEpisodeThrough", () => {
     completeEpisodeThrough(db, { episodeId: epIds.s1e2!, userId, now: () => 1000 });
 
     const result = setWatchedThrough(db, { episodeId: epIds.s1e1!, userId, now: () => 2000 });
-
     expect(result).toEqual({ marked: 0, unmarked: 1 });
     expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e1!)).get()!.watched).toBe(true);
     expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e2!)).get()!.watched).toBe(false);
@@ -216,5 +215,72 @@ describe("completeEpisodeThrough", () => {
     expect(result).toEqual({ marked: 2, unmarked: 0 });
     expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e1!)).get()!.watched).toBe(true);
     expect(db.select().from(episodes).where(eq(episodes.id, epIds.s1e2!)).get()!.watched).toBe(true);
+  });
+});
+
+describe("entry counter reconciliation (season-scoped entry)", () => {
+  let db: Db;
+  let userId: number;
+  let animeId: number;
+  let epIds: number[];
+
+  beforeEach(() => {
+    db = createDb(":memory:");
+    const user = db
+      .insert(users)
+      .values({ username: "admin", passwordHash: "x", preferences: {}, createdAt: 1 })
+      .returning()
+      .get();
+    userId = user.id;
+    // Rascal-style: the entry IS one season (13 episodes) whose episodes carry
+    // franchise-wide absolute numbers (17-29) that are larger than the entry
+    // total, and the entry counter was imported from MAL (11/13).
+    animeId = db
+      .insert(animes)
+      .values({
+        anilistId: 999_010,
+        titleRomaji: "Season-Scoped Entry",
+        status: "watching",
+        episodeCount: 13,
+        watchedEpisodes: 11,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .returning()
+      .get().id;
+    const seasonId = db.insert(seasons).values({ animeId, number: 2 }).returning().get().id;
+    epIds = [];
+    for (let n = 1; n <= 13; n++) {
+      epIds.push(
+        db
+          .insert(episodes)
+          .values({ seasonId, episodeNumber: n, absoluteNumber: 16 + n, durationSeconds: 1420, progressSeconds: 0 })
+          .returning()
+          .get().id,
+      );
+    }
+  });
+
+  it("keeps the MAL counter when re-marking episodes the counter already covers", () => {
+    // The user "double-checks" EP 11 after the MAL sync already counted 11.
+    const completed = completeEpisodeThrough(db, { episodeId: epIds[10]!, userId, now: () => 1000 });
+
+    expect(completed).toBe(11);
+    expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(11);
+    const flagged = db.select().from(episodes).all().filter((e) => e.watched).length;
+    expect(flagged).toBe(11);
+  });
+
+  it("advances the counter only to the furthest entry position, never summing", () => {
+    // Marking through EP 13 reaches the end of the entry (13), not 11 + 13.
+    completeEpisodeThrough(db, { episodeId: epIds[12]!, userId, now: () => 1000 });
+
+    expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(13);
+  });
+
+  it("never rewinds the counter when marking an episode already covered by MAL", () => {
+    completeEpisode(db, { episodeId: epIds[4]!, userId, positionSeconds: 100, now: () => 1000 });
+
+    expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(11);
   });
 });

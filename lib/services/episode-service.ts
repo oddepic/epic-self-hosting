@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { animes, episodes, playbackHistory, seasons } from "../db/schema";
 
@@ -6,15 +6,40 @@ export function formatEpisodeLabel(seasonNumber: number, episodeNumber: number):
   return `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
 }
 
-// Entry-level watched counter: MAL counts episodes across ALL seasons of a
-// single entry (One Piece, Naruto…), so the per-season flags alone can't
-// drive the MAL progress. The anime row's watchedEpisodes is the source of
-// truth. When an episode carries an absolute number (its sequential position
-// in the whole series, e.g. One Piece S23E01 = 1156), marking it watched
-// jumps the counter to that position — because having watched the 1156th
-// episode means at least 1156 episodes are seen. For season-scoped entries
-// (Re:ZERO 4th Season: entry total 19, absolute 67+) the absolute scale
-// doesn't match the entry, so a plain +1 is used instead.
+// An episode's position within its MAL entry — the scale the entry-level
+// watchedEpisodes counter lives on. Two shapes exist:
+//   - Entries that ARE one season (Rascal 2026, Re:ZERO 4th Season: the
+//     entry's total equals the season's episode count) use the season-local
+//     episode number. The franchise-wide absolute number is NOT used here —
+//     Seishun Buta S2E11 is absolute 27 but episode 11 of its 13-ep entry.
+//   - Whole-franchise entries (One Piece: entry total unknown) use the
+//     absolute number, which is 1-based across the whole series.
+// When neither applies the position is unknown and the caller falls back.
+function episodeEntryPosition(
+  db: Db,
+  anime: { episodeCount: number | null },
+  episode: typeof episodes.$inferSelect,
+): number | null {
+  if (anime.episodeCount != null) {
+    const season = db.select().from(seasons).where(eq(seasons.id, episode.seasonId)).get();
+    if (!season) return null;
+    const count =
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(episodes)
+        .where(eq(episodes.seasonId, season.id))
+        .get()?.count ?? 0;
+    return count === anime.episodeCount ? episode.episodeNumber : null;
+  }
+  return episode.absoluteNumber;
+}
+
+// Entry-level watched counter: MAL counts watched episodes as a POSITION
+// ("you've seen up to episode N of this entry"), never as a running total of
+// per-episode marks. Marking forward therefore reconciles to the furthest
+// entry position instead of adding 1 for every episode — otherwise episodes
+// already counted by the MAL sync (e.g. watchedEpisodes = 11) would be counted
+// a second time when their checkmarks are marked (11 + 11 = 22).
 function bumpWatchedCounter(
   db: Db,
   animeId: number,
@@ -23,12 +48,17 @@ function bumpWatchedCounter(
 ): void {
   const anime = db.select().from(animes).where(eq(animes.id, animeId)).get();
   if (!anime) return;
-  const absolute = episode?.absoluteNumber ?? null;
-  const useAbsolute =
-    delta > 0 && absolute != null && (anime.episodeCount == null || absolute <= anime.episodeCount);
-  const next = useAbsolute
-    ? Math.max(anime.watchedEpisodes, absolute)
-    : Math.max(0, anime.watchedEpisodes + delta);
+  if (delta > 0 && episode) {
+    const position = episodeEntryPosition(db, anime, episode);
+    if (position != null) {
+      db.update(animes)
+        .set({ watchedEpisodes: Math.max(anime.watchedEpisodes, position) })
+        .where(eq(animes.id, animeId))
+        .run();
+      return;
+    }
+  }
+  const next = Math.max(0, anime.watchedEpisodes + delta);
   db.update(animes).set({ watchedEpisodes: next }).where(eq(animes.id, animeId)).run();
 }
 

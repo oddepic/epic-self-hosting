@@ -176,7 +176,38 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   const seasonEpisodes = detail?.episodes ?? [];
   const progressCount = anime?.watchedEpisodes ?? 0;
   const entryTotal = anime?.episodeCount ?? null;
-  const nextUnwatched = seasonEpisodes.find((e) => !e.watched) ?? null;
+
+  // The season currently shown, used to reconcile the entry-level MAL counter
+  // with the per-episode checkmarks (below).
+  const selectedSeasonNumber =
+    season ?? detail?.resume?.seasonNumber ?? detail?.seasons[0]?.number ?? null;
+  const selectedSeasonSummary =
+    detail?.seasons.find((s) => s.number === selectedSeasonNumber) ?? null;
+
+  // An episode reads as "watched" when its flag is set OR when the entry
+  // counter already covers it. MAL sync only writes the entry counter, never
+  // individual flags, so without this the checkmarks would look blank even
+  // though progress says 11/13. Must mirror episode-service's resolution:
+  // when the displayed season IS the entry (its episode count equals the
+  // entry total) the season-local episode number is the entry position;
+  // otherwise whole-franchise entries (One Piece) use the absolute number.
+  const isWatched = (episode: {
+    watched: boolean;
+    episodeNumber: number;
+    absoluteNumber: number | null;
+  }): boolean => {
+    if (episode.watched) return true;
+    if (anime == null) return false;
+    if (entryTotal != null) {
+      if (selectedSeasonSummary?.totalCount === entryTotal) {
+        return episode.episodeNumber <= Math.min(progressCount, entryTotal);
+      }
+      return false;
+    }
+    return episode.absoluteNumber != null && episode.absoluteNumber <= progressCount;
+  };
+
+  const nextUnwatched = seasonEpisodes.find((e) => !isWatched(e)) ?? null;
   const showProgress =
     anime != null && !newAnime && anime.status !== "completed" && anime.status !== "plan_to_watch";
 
@@ -699,7 +730,7 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-text-primary">{episode.title ?? `Episode ${episode.episodeNumber}`}</p>
-                      <p className="text-xs text-text-muted">{episodeStatusText(episode)}</p>
+                      <p className="text-xs text-text-muted">{episodeStatusText({ ...episode, watched: isWatched(episode) })}</p>
                     </div>
                     <span className="shrink-0 font-mono text-xs text-text-muted">
                       {formatDuration(episode.durationSeconds)}
@@ -707,14 +738,14 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                     {episode.available && (
                       <div className="flex shrink-0 items-center gap-1">
                         <button
-                          title={episode.watched ? `Unmark EP ${episode.episodeNumber}` : `Mark EP ${episode.episodeNumber} watched`}
+                          title={isWatched(episode) ? `Unmark EP ${episode.episodeNumber}` : `Mark EP ${episode.episodeNumber} watched`}
                           aria-label={`Toggle episode ${episode.episodeNumber} watched`}
                           onClick={(e) => {
                             e.stopPropagation();
                             void (episode.watched ? onUnwatch(episode.id) : onMarkWatched(episode.id));
                           }}
                           className={`rounded-lg p-1.5 transition-colors ${
-                            episode.watched
+                            isWatched(episode)
                               ? "text-success"
                               : "text-text-muted hover:bg-surface-hover hover:text-success"
                           }`}
@@ -722,14 +753,14 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                           <Check className="h-4 w-4" aria-hidden />
                         </button>
                         <button
-                          title={episode.watched ? `Unmark through EP ${episode.episodeNumber}` : `Mark through EP ${episode.episodeNumber} watched`}
+                          title={isWatched(episode) ? `Unmark through EP ${episode.episodeNumber}` : `Mark through EP ${episode.episodeNumber} watched`}
                           aria-label={`Toggle all episodes up to ${episode.episodeNumber} watched`}
                           onClick={(e) => {
                             e.stopPropagation();
                             void (episode.watched ? onUnwatchThrough(episode.id) : onMarkWatchedThrough(episode.id));
                           }}
                           className={`rounded-lg p-1.5 transition-colors ${
-                            episode.watched
+                            isWatched(episode)
                               ? "text-success"
                               : "text-text-muted hover:bg-surface-hover hover:text-success"
                           }`}
