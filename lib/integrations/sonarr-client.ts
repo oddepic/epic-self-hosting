@@ -187,6 +187,19 @@ export class SonarrHttpClient implements SonarrClient {
     });
   }
 
+  async rescanSeries(seriesId: number): Promise<{ id: number }> {
+    return this.request("/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "RescanSeries", seriesId }),
+    });
+  }
+
+  async getCommandStatus(commandId: number): Promise<string> {
+    const body = await this.request<{ status?: string }>(`/command/${commandId}`);
+    return body.status ?? "unknown";
+  }
+
   async getSeries(): Promise<SonarrSeries[]> {
     const results = await this.request<SonarrSeriesResource[]>("/series");
     return results.map((s) => ({

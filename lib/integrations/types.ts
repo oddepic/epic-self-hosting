@@ -108,6 +108,8 @@ export interface SonarrClient {
   triggerImport(files: unknown[]): Promise<{ id: number }>;
   getMissingMonitoredBySeries(): Promise<{ seriesId: number; episodeIds: number[] }[]>;
   searchEpisodes(episodeIds: number[]): Promise<{ id: number }>;
+  rescanSeries(seriesId: number): Promise<{ id: number }>;
+  getCommandStatus(commandId: number): Promise<string>;
   getSeries(): Promise<SonarrSeries[]>;
   getDiskSpace(): Promise<SonarrDiskSpace[]>;
   deleteSeries(id: number, deleteFiles: boolean): Promise<void>;

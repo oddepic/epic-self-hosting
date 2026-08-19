@@ -23,7 +23,7 @@ export async function POST() {
     const pending = await importService.findPendingImports(config.sonarrRootFolder);
     const importsTriggered = await importService.importFiles(pending);
 
-    const result = await reconcileAvailability(db, jellyfin, sonarr);
+    const result = await reconcileAvailability(db, jellyfin, sonarr, { rescanSonarr: true });
 
     publish("availability-updated", { reason: "library-sync" });
 

@@ -73,6 +73,12 @@ function fakeSonarr(): SonarrClient & { deleted: { id: number; deleteFiles: bool
     async searchEpisodes() {
       return { id: 1 };
     },
+    async rescanSeries() {
+      return { id: 1 };
+    },
+    async getCommandStatus() {
+      return "completed";
+    },
     async getSeries() {
       return [makeSeries({ id: 21 }), makeSeries({ id: 22 })];
     },

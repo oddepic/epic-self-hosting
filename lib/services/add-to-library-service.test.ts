@@ -130,6 +130,12 @@ function fakeSonarr(
     async searchEpisodes() {
       return { id: 1 };
     },
+    async rescanSeries() {
+      return { id: 1 };
+    },
+    async getCommandStatus() {
+      return "completed";
+    },
     async getSeries() {
       return [];
     },

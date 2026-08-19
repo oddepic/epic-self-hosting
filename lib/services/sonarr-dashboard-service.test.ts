@@ -60,6 +60,12 @@ function fakeSonarr(series: SonarrSeries[], disks: { path: string; freeSpace: nu
     async searchEpisodes() {
       return { id: 1 };
     },
+    async rescanSeries() {
+      return { id: 1 };
+    },
+    async getCommandStatus() {
+      return "completed";
+    },
     async getSeries() {
       state.seriesCalls++;
       return series;
