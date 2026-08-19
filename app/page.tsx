@@ -21,6 +21,30 @@ export default function Home() {
   const [refreshed, setRefreshed] = useState(false);
   const [sonarrMissing, setSonarrMissing] = useState(false);
 
+  // Missing-status polling lives at the app level so the Sonarr red dot stays
+  // current regardless of the active tab (the Sonarr view only mounts when it
+  // is selected, which would leave the dot stale everywhere else).
+  useEffect(() => {
+    let active = true;
+    const tick = async () => {
+      try {
+        const res = await fetch("/api/sonarr/library");
+        if (res.ok) {
+          const body = (await res.json()) as { library: { missingCount: number }[] };
+          if (active) setSonarrMissing(body.library.some((row) => row.missingCount > 0));
+        }
+      } catch {
+        // Keep the last known state; the next interval tick retries.
+      }
+    };
+    void tick();
+    const timer = setInterval(tick, 20_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [refresh]);
+
   useEffect(() => {
     const es = new EventSource("/api/events");
     es.addEventListener("availability-updated", () => setRefresh((r) => r + 1));
@@ -56,9 +80,7 @@ export default function Home() {
       {view === "list" && (
         <ListView onOpenAnime={(target) => setModal(target)} refreshSignal={refresh} />
       )}
-      {view === "sonarr" && (
-        <SonarrView refreshSignal={refresh} onMissingChange={setSonarrMissing} />
-      )}
+      {view === "sonarr" && <SonarrView refreshSignal={refresh} />}
       {view === "downloads" && <DownloadsView refreshSignal={refresh} />}
       {view === "settings" && <SettingsView refreshSignal={refresh} />}
 

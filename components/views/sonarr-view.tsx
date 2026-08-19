@@ -19,13 +19,7 @@ const DOWNLOAD_STATUS: Record<string, { label: string; className: string }> = {
   missing: { label: "Missing", className: "text-danger" },
 };
 
-export default function SonarrView({
-  refreshSignal,
-  onMissingChange,
-}: {
-  refreshSignal?: number;
-  onMissingChange?: (hasMissing: boolean) => void;
-}) {
+export default function SonarrView({ refreshSignal }: { refreshSignal?: number }) {
   const [overview, setOverview] = useState<SonarrOverview | null>(null);
   const [library, setLibrary] = useState<SonarrLibraryRow[]>([]);
   const [filter, setFilter] = useState("");
@@ -57,10 +51,6 @@ export default function SonarrView({
     const timer = setInterval(() => void load(), 15_000);
     return () => clearInterval(timer);
   }, [load, refreshSignal]);
-
-  useEffect(() => {
-    onMissingChange?.(library.some((row) => row.missingCount > 0));
-  }, [library, onMissingChange]);
 
   async function refreshLibraryRows(): Promise<SonarrLibraryRow[] | null> {
     try {
