@@ -8,10 +8,11 @@ interface Props {
   onRefresh: () => void;
   refreshing: boolean;
   refreshed: boolean;
+  sonarrAlert?: boolean;
   children: ReactNode;
 }
 
-export default function AppShell({ active, onNavigate, onRefresh, refreshing, refreshed, children }: Props) {
+export default function AppShell({ active, onNavigate, onRefresh, refreshing, refreshed, sonarrAlert, children }: Props) {
   return (
     <div className="min-h-screen bg-background text-text-primary">
       <header className="mx-auto flex w-full max-w-[1800px] flex-wrap items-center justify-between gap-4 px-8 py-6">
@@ -31,7 +32,7 @@ export default function AppShell({ active, onNavigate, onRefresh, refreshing, re
           </div>
           <p className="text-xs text-text-muted">Library footprint, downloads & anime tracking</p>
         </div>
-        <Navigation active={active} onNavigate={onNavigate} />
+        <Navigation active={active} onNavigate={onNavigate} sonarrAlert={sonarrAlert} />
       </header>
       <main className="mx-auto w-full max-w-[1800px] px-8 pb-12">{children}</main>
     </div>

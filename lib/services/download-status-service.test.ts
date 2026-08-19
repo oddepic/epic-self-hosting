@@ -77,7 +77,7 @@ function fakeSonarr(behavior: { queue?: QueueRecord[]; series?: SonarrSeries[] }
     async triggerImport() {
       return { id: 1 };
     },
-    async getMissingMonitoredEpisodeIds() {
+    async getMissingMonitoredBySeries() {
       return [];
     },
     async searchEpisodes() {

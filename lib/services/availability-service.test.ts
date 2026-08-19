@@ -52,7 +52,7 @@ function fakeSonarr(behavior: {
     async triggerImport() {
       return { id: 1 };
     },
-    async getMissingMonitoredEpisodeIds() {
+    async getMissingMonitoredBySeries() {
       return [];
     },
     async searchEpisodes() {

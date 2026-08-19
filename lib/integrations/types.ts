@@ -106,7 +106,7 @@ export interface SonarrClient {
   updateCustomFormat(id: number, format: unknown): Promise<unknown>;
   getManualImport(folder: string): Promise<unknown[]>;
   triggerImport(files: unknown[]): Promise<{ id: number }>;
-  getMissingMonitoredEpisodeIds(): Promise<number[]>;
+  getMissingMonitoredBySeries(): Promise<{ seriesId: number; episodeIds: number[] }[]>;
   searchEpisodes(episodeIds: number[]): Promise<{ id: number }>;
   getSeries(): Promise<SonarrSeries[]>;
   getDiskSpace(): Promise<SonarrDiskSpace[]>;

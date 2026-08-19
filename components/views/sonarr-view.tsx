@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Database, HardDrive, Search, Tv } from "lucide-react";
+import { Database, HardDrive, Search, Tv, Wrench } from "lucide-react";
 import Input from "@/components/ui/input";
 import Skeleton from "@/components/ui/skeleton";
 import Card from "@/components/ui/card";
@@ -16,14 +16,22 @@ function formatBytes(bytes: number): string {
 const DOWNLOAD_STATUS: Record<string, { label: string; className: string }> = {
   finished: { label: "Finished", className: "text-success" },
   downloading: { label: "Downloading", className: "text-info" },
+  missing: { label: "Missing", className: "text-danger" },
 };
 
-export default function SonarrView({ refreshSignal }: { refreshSignal?: number }) {
+export default function SonarrView({
+  refreshSignal,
+  onMissingChange,
+}: {
+  refreshSignal?: number;
+  onMissingChange?: (hasMissing: boolean) => void;
+}) {
   const [overview, setOverview] = useState<SonarrOverview | null>(null);
   const [library, setLibrary] = useState<SonarrLibraryRow[]>([]);
   const [filter, setFilter] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
+  const [fixingId, setFixingId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setError(false);
@@ -45,6 +53,24 @@ export default function SonarrView({ refreshSignal }: { refreshSignal?: number }
   useEffect(() => {
     void load();
   }, [load, refreshSignal]);
+
+  useEffect(() => {
+    onMissingChange?.(library.some((row) => row.missingCount > 0));
+  }, [library, onMissingChange]);
+
+  async function fixSeries(seriesId: number) {
+    setFixingId(seriesId);
+    try {
+      const res = await fetch("/api/sonarr/search-missing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seriesId }),
+      });
+      if (res.ok) void load();
+    } finally {
+      setFixingId(null);
+    }
+  }
 
   if (error) {
     return (
@@ -135,7 +161,22 @@ export default function SonarrView({ refreshSignal }: { refreshSignal?: number }
                 <td className="px-4 py-3 text-text-primary">{row.title}</td>
                 <td className="px-4 py-3 font-mono text-xs text-text-secondary">{row.addedLabel}</td>
                 <td className={`px-4 py-3 text-xs ${DOWNLOAD_STATUS[row.downloadStatus]?.className ?? "text-text-secondary"}`}>
-                  {DOWNLOAD_STATUS[row.downloadStatus]?.label ?? "—"}
+                  <span className="inline-flex items-center gap-2">
+                    {row.downloadStatus === "missing"
+                      ? `Missing · ${row.missingCount}`
+                      : DOWNLOAD_STATUS[row.downloadStatus]?.label ?? "—"}
+                    {row.downloadStatus === "missing" && (
+                      <button
+                        onClick={() => void fixSeries(row.id)}
+                        disabled={fixingId === row.id}
+                        aria-label={`Search missing episodes for ${row.title}`}
+                        className="rounded-lg border border-border bg-surface px-2 py-1 text-xs text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Wrench className="mr-1 inline h-3.5 w-3.5" aria-hidden />
+                        {fixingId === row.id ? "Searching…" : "Fix"}
+                      </button>
+                    )}
+                  </span>
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-text-secondary">
                   {row.monitored ? "● MON" : "—"}

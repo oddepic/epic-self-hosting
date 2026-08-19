@@ -19,6 +19,7 @@ export default function Home() {
   const [refresh, setRefresh] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshed, setRefreshed] = useState(false);
+  const [sonarrMissing, setSonarrMissing] = useState(false);
 
   useEffect(() => {
     const es = new EventSource("/api/events");
@@ -41,14 +42,23 @@ export default function Home() {
   }
 
   return (
-    <AppShell active={view} onNavigate={setView} onRefresh={onRefresh} refreshing={refreshing} refreshed={refreshed}>
+    <AppShell
+      active={view}
+      onNavigate={setView}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+      refreshed={refreshed}
+      sonarrAlert={sonarrMissing}
+    >
       {view === "anime" && (
         <AnimeView onOpenAnime={(id) => setModal({ animeId: id })} refreshSignal={refresh} />
       )}
       {view === "list" && (
         <ListView onOpenAnime={(target) => setModal(target)} refreshSignal={refresh} />
       )}
-      {view === "sonarr" && <SonarrView refreshSignal={refresh} />}
+      {view === "sonarr" && (
+        <SonarrView refreshSignal={refresh} onMissingChange={setSonarrMissing} />
+      )}
       {view === "downloads" && <DownloadsView refreshSignal={refresh} />}
       {view === "settings" && <SettingsView refreshSignal={refresh} />}
 

@@ -54,7 +54,7 @@ function fakeSonarr(series: SonarrSeries[], disks: { path: string; freeSpace: nu
     async triggerImport() {
       return { id: 1 };
     },
-    async getMissingMonitoredEpisodeIds() {
+    async getMissingMonitoredBySeries() {
       return [];
     },
     async searchEpisodes() {
@@ -176,6 +176,18 @@ describe("SonarrDashboardService", () => {
       expect(rows.find((r) => r.id === 1)!.downloadStatus).toBe("finished");
       expect(rows.find((r) => r.id === 2)!.downloadStatus).toBe("downloading");
       expect(rows.find((r) => r.id === 3)!.downloadStatus).toBe("downloading");
+    });
+
+    it("marks a series missing and sets its missing count from Sonarr", async () => {
+      const sonarr = fakeSonarr([makeSeries({ episodeFileCount: 5, monitoredEpisodesTotal: 13 })]);
+      sonarr.getMissingMonitoredBySeries = async () => [
+        { seriesId: 1, episodeIds: [5203, 5199, 5198] },
+      ];
+      const service = new SonarrDashboardService(db, sonarr, { rootFolder: "/data/anime" });
+
+      const rows = await service.getLibrary();
+
+      expect(rows[0]).toMatchObject({ missingCount: 3, downloadStatus: "missing" });
     });
 
     it("labels when the series was downloaded relative to now", async () => {

@@ -14,9 +14,10 @@ export interface SonarrLibraryRow {
   status: string | null;
   monitored: boolean;
   episodesLabel: string;
+  missingCount: number;
   sizeOnDisk: number;
   sizeRatio: number;
-  downloadStatus: "finished" | "downloading";
+  downloadStatus: "finished" | "downloading" | "missing";
   addedLabel: string;
 }
 
@@ -38,7 +39,12 @@ function formatEpisodes(episodeFileCount: number, monitoredEpisodesTotal: number
   return `${episodeFileCount}/${monitoredEpisodesTotal}`;
 }
 
-function downloadStatusOf(episodeFileCount: number, monitoredEpisodesTotal: number): SonarrLibraryRow["downloadStatus"] {
+function downloadStatusOf(
+  episodeFileCount: number,
+  monitoredEpisodesTotal: number,
+  missingCount: number,
+): SonarrLibraryRow["downloadStatus"] {
+  if (missingCount > 0) return "missing";
   return monitoredEpisodesTotal > 0 && episodeFileCount >= monitoredEpisodesTotal ? "finished" : "downloading";
 }
 
@@ -61,7 +67,11 @@ export class SonarrDashboardService {
   }
 
   async getLibrary(now: number = Date.now()): Promise<SonarrLibraryRow[]> {
-    const series = await this.sonarr.getSeries();
+    const [series, missingBySeries] = await Promise.all([
+      this.sonarr.getSeries(),
+      this.sonarr.getMissingMonitoredBySeries(),
+    ]);
+    const missingCountById = new Map(missingBySeries.map((entry) => [entry.seriesId, entry.episodeIds.length]));
     const maxSize = Math.max(1, ...series.map((s) => s.sizeOnDisk));
     return series
       .map((s) => ({
@@ -71,9 +81,10 @@ export class SonarrDashboardService {
         status: s.status,
         monitored: s.monitored,
         episodesLabel: formatEpisodes(s.episodeFileCount, s.monitoredEpisodesTotal),
+        missingCount: missingCountById.get(s.id) ?? 0,
         sizeOnDisk: s.sizeOnDisk,
         sizeRatio: s.sizeOnDisk / maxSize,
-        downloadStatus: downloadStatusOf(s.episodeFileCount, s.monitoredEpisodesTotal),
+        downloadStatus: downloadStatusOf(s.episodeFileCount, s.monitoredEpisodesTotal, missingCountById.get(s.id) ?? 0),
         addedLabel: addedLabelOf(s.addedAt, now),
       }))
       .sort((a, b) => a.title.localeCompare(b.title));
