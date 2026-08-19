@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadConfig } from "@/lib/config";
 import { JellyfinSdkClient } from "@/lib/integrations/jellyfin-client";
+import { SonarrHttpClient } from "@/lib/integrations/sonarr-client";
+import { reconcileAvailability, waitForJellyfinLibraryScan } from "@/lib/services/availability-reconciliation-service";
+import { createDb } from "@/lib/db/client";
+import { publish } from "@/lib/events/bus";
 
 export async function POST(request: NextRequest) {
   const config = loadConfig();
+  const db = createDb(config.databaseUrl);
 
   if (!config.jellyfinUrl || !config.jellyfinApiKey) {
     return NextResponse.json({ error: "Jellyfin not configured" }, { status: 503 });
@@ -23,7 +28,11 @@ export async function POST(request: NextRequest) {
 
   try {
     await jellyfin.refreshLibrary();
-    return NextResponse.json({ ok: true });
+    await waitForJellyfinLibraryScan(jellyfin);
+    const sonarr = new SonarrHttpClient(config.sonarrUrl, config.sonarrApiKey);
+    const result = await reconcileAvailability(db, jellyfin, sonarr);
+    publish("availability-updated", { reason: "jellyfin-refresh" });
+    return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     console.error("jellyfin refresh failed:", error);
     return NextResponse.json(
