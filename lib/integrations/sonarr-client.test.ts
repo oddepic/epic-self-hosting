@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAddSeriesBody, countRealEpisodes } from "./sonarr-client";
+import { buildAddSeriesBody, buildEpisodeSearchCommand, countRealEpisodes } from "./sonarr-client";
 import type { SonarrCandidate } from "./types";
 
 function makeCandidate(overrides: Partial<SonarrCandidate> = {}): SonarrCandidate {
@@ -72,5 +72,14 @@ describe("countRealEpisodes", () => {
 
   it("tolerates seasons without statistics", () => {
     expect(countRealEpisodes([{ seasonNumber: 0 }, { seasonNumber: 1 }])).toBe(0);
+  });
+});
+
+describe("buildEpisodeSearchCommand", () => {
+  it("targets only the explicit missing episode ids", () => {
+    expect(buildEpisodeSearchCommand([5203, 5199, 5203])).toEqual({
+      name: "EpisodeSearch",
+      episodeIds: [5203, 5199],
+    });
   });
 });

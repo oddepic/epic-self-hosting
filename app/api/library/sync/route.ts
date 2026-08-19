@@ -32,6 +32,16 @@ export async function POST() {
     const importService = new SonarrImportService(sonarr);
     const pending = await importService.findPendingImports(config.sonarrRootFolder);
     const importsTriggered = await importService.importFiles(pending);
+    const pendingEpisodeIds = new Set(pending.flatMap((item) => item.episodeIds));
+    const missingEpisodeIds = (await sonarr.getMissingMonitoredEpisodeIds()).filter(
+      (episodeId) => !pendingEpisodeIds.has(episodeId),
+    );
+    const missingSearchTriggered = missingEpisodeIds.length > 0;
+    if (missingSearchTriggered) {
+      // Explicit episode IDs only. Never use SeriesSearch/SeasonSearch here:
+      // the refresh button must not re-search an entire anime accidentally.
+      await sonarr.searchEpisodes(missingEpisodeIds);
+    }
 
     const service = new AvailabilityService(db, jellyfin, sonarr);
     let result = await service.sync();
@@ -53,7 +63,13 @@ export async function POST() {
 
     publish("availability-updated", { reason: "library-sync" });
 
-    return NextResponse.json({ ...result, importsTriggered, rescanTriggered });
+    return NextResponse.json({
+      ...result,
+      importsTriggered,
+      missingSearchTriggered,
+      missingSearchCount: missingEpisodeIds.length,
+      rescanTriggered,
+    });
   } catch (error) {
     console.error("library sync failed:", error);
     return NextResponse.json(

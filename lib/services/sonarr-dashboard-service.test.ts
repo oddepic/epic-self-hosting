@@ -54,6 +54,12 @@ function fakeSonarr(series: SonarrSeries[], disks: { path: string; freeSpace: nu
     async triggerImport() {
       return { id: 1 };
     },
+    async getMissingMonitoredEpisodeIds() {
+      return [];
+    },
+    async searchEpisodes() {
+      return { id: 1 };
+    },
     async getSeries() {
       state.seriesCalls++;
       return series;

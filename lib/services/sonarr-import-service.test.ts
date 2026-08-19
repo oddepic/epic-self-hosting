@@ -63,6 +63,12 @@ function fakeSonarr(items: ManualImportItemDto[]): SonarrClient & { imported: un
       imported.push(...files);
       return { id: 1 };
     },
+    async getMissingMonitoredEpisodeIds() {
+      return [];
+    },
+    async searchEpisodes() {
+      return { id: 1 };
+    },
     async getSeries() {
       return [];
     },

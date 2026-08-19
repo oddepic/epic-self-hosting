@@ -67,6 +67,12 @@ function fakeSonarr(): SonarrClient & { deleted: { id: number; deleteFiles: bool
     async triggerImport() {
       return { id: 1 };
     },
+    async getMissingMonitoredEpisodeIds() {
+      return [];
+    },
+    async searchEpisodes() {
+      return { id: 1 };
+    },
     async getSeries() {
       return [makeSeries({ id: 21 }), makeSeries({ id: 22 })];
     },

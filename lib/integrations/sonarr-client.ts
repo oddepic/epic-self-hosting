@@ -159,6 +159,29 @@ export class SonarrHttpClient implements SonarrClient {
     });
   }
 
+  async getMissingMonitoredEpisodeIds(): Promise<number[]> {
+    const ids: number[] = [];
+    const pageSize = 1000;
+    for (let page = 1; ; page++) {
+      const body = await this.request<{
+        records?: { id: number; hasFile?: boolean; monitored?: boolean }[];
+        totalRecords?: number;
+      }>(`/wanted/missing?monitored=true&includeSeries=false&page=${page}&pageSize=${pageSize}`);
+      const records = body.records ?? [];
+      ids.push(...records.filter((episode) => episode.monitored !== false && episode.hasFile !== true).map((episode) => episode.id));
+      if (records.length === 0 || ids.length >= (body.totalRecords ?? ids.length)) break;
+    }
+    return ids;
+  }
+
+  async searchEpisodes(episodeIds: number[]): Promise<{ id: number }> {
+    return this.request("/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildEpisodeSearchCommand(episodeIds)),
+    });
+  }
+
   async getSeries(): Promise<SonarrSeries[]> {
     const results = await this.request<SonarrSeriesResource[]>("/series");
     return results.map((s) => ({
@@ -229,4 +252,11 @@ export function buildAddSeriesBody(
   }
 
   return body;
+}
+
+export function buildEpisodeSearchCommand(episodeIds: number[]): { name: "EpisodeSearch"; episodeIds: number[] } {
+  return {
+    name: "EpisodeSearch",
+    episodeIds: [...new Set(episodeIds)],
+  };
 }
