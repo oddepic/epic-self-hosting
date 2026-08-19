@@ -52,6 +52,10 @@ export default function SonarrView({
 
   useEffect(() => {
     void load();
+    // Re-check missing episodes automatically so deletions or new imports
+    // are reflected without waiting for a manual refresh.
+    const timer = setInterval(() => void load(), 15_000);
+    return () => clearInterval(timer);
   }, [load, refreshSignal]);
 
   useEffect(() => {
