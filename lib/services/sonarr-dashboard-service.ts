@@ -34,12 +34,12 @@ function addedLabelOf(addedAt: number | null, now: number): string {
   return capitalizeWords(`${days} days ago`);
 }
 
-function formatEpisodes(episodeFileCount: number, totalEpisodeCount: number): string {
-  return `${episodeFileCount}/${totalEpisodeCount}`;
+function formatEpisodes(episodeFileCount: number, monitoredEpisodesTotal: number): string {
+  return `${episodeFileCount}/${monitoredEpisodesTotal}`;
 }
 
-function downloadStatusOf(episodeFileCount: number, totalEpisodeCount: number): SonarrLibraryRow["downloadStatus"] {
-  return totalEpisodeCount > 0 && episodeFileCount >= totalEpisodeCount ? "finished" : "downloading";
+function downloadStatusOf(episodeFileCount: number, monitoredEpisodesTotal: number): SonarrLibraryRow["downloadStatus"] {
+  return monitoredEpisodesTotal > 0 && episodeFileCount >= monitoredEpisodesTotal ? "finished" : "downloading";
 }
 
 export class SonarrDashboardService {
@@ -70,10 +70,10 @@ export class SonarrDashboardService {
         year: s.year,
         status: s.status,
         monitored: s.monitored,
-        episodesLabel: formatEpisodes(s.episodeFileCount, s.totalEpisodeCount),
+        episodesLabel: formatEpisodes(s.episodeFileCount, s.monitoredEpisodesTotal),
         sizeOnDisk: s.sizeOnDisk,
         sizeRatio: s.sizeOnDisk / maxSize,
-        downloadStatus: downloadStatusOf(s.episodeFileCount, s.totalEpisodeCount),
+        downloadStatus: downloadStatusOf(s.episodeFileCount, s.monitoredEpisodesTotal),
         addedLabel: addedLabelOf(s.addedAt, now),
       }))
       .sort((a, b) => a.title.localeCompare(b.title));

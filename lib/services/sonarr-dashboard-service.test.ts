@@ -144,12 +144,23 @@ describe("SonarrDashboardService", () => {
     });
 
     it("guards against zero total episodes for the episodes label", async () => {
-      const sonarr = fakeSonarr([makeSeries({ episodeFileCount: 0, totalEpisodeCount: 0 })]);
+      const sonarr = fakeSonarr([makeSeries({ episodeFileCount: 0, totalEpisodeCount: 0, monitoredEpisodesTotal: 0 })]);
       const service = new SonarrDashboardService(db, sonarr, { rootFolder: "/data/anime" });
 
       const rows = await service.getLibrary();
 
       expect(rows[0]!.episodesLabel).toBe("0/0");
+    });
+
+    it("uses the monitored episode scope like the Downloads view", async () => {
+      const sonarr = fakeSonarr([
+        makeSeries({ episodeFileCount: 5, totalEpisodeCount: 35, monitoredEpisodesTotal: 13 }),
+      ]);
+      const service = new SonarrDashboardService(db, sonarr, { rootFolder: "/data/anime" });
+
+      const rows = await service.getLibrary();
+
+      expect(rows[0]!.episodesLabel).toBe("5/13");
     });
 
     it("reports download status per series", async () => {
