@@ -80,6 +80,8 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   const loadGenerationRef = useRef(0);
   const [changingStatus, setChangingStatus] = useState(false);
   const [fetchingMissing, setFetchingMissing] = useState(false);
+  // Per-episode fetch in flight (Bug 06 Problem 5 follow-up).
+  const [fetchingEpisodeIds, setFetchingEpisodeIds] = useState<number[]>([]);
   const [addState, setAddState] = useState<{
     phase: "checking" | "confirm" | "added";
     candidates: SonarrCandidate[] | null;
@@ -246,6 +248,22 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     onChanged();
   }
 
+  async function onFetchEpisode(episodeId: number) {
+    if (fetchingEpisodeIds.includes(episodeId)) return;
+    setFetchingEpisodeIds((ids) => [...ids, episodeId]);
+    try {
+      await fetch("/api/sonarr/search-episode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episodeId }),
+      });
+    } catch {
+      // Reload below regardless; availability catches up on the next sync.
+    }
+    setFetchingEpisodeIds((ids) => ids.filter((id) => id !== episodeId));
+    void load();
+  }
+
   useEffect(() => {
     setProgressInput(String(progressCount));
   }, [progressCount]);
@@ -282,9 +300,15 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     );
   }
 
+  // The whole header — hero, title, romaji, metadata — belongs to the entry
+  // that owns the displayed season, so switching seasons swaps everything.
   const heroImage = newAnime
     ? newAnime.bannerImageUrl ?? newAnime.coverImageUrl
-    : anime?.bannerImageUrl ?? anime?.coverImageUrl ?? null;
+    : selectedMember?.bannerImageUrl ??
+      selectedMember?.coverImageUrl ??
+      anime?.bannerImageUrl ??
+      anime?.coverImageUrl ??
+      null;
   const primary = detail ? (detail.resume ?? detail.start) : null;
   const metadata = newAnime
     ? [
@@ -294,13 +318,12 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
       ]
         .filter(Boolean)
         .join(" · ")
-    : anime
+    : selectedMember
       ? [
-          anime.format,
-          anime.seasonYear ? String(anime.seasonYear) : null,
-          anime.episodeCount ? `${anime.episodeCount} eps` : null,
-          // The selected season's entry status — it changes with the dropdown.
-          selectedMember ? STATUS_LABELS[selectedMember.status] : null,
+          selectedMember.format,
+          selectedMember.seasonYear ? String(selectedMember.seasonYear) : null,
+          selectedMember.episodeCount ? `${selectedMember.episodeCount} eps` : null,
+          STATUS_LABELS[selectedMember.status],
         ]
           .filter(Boolean)
           .join(" · ")
@@ -513,10 +536,10 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
             <h1 className="text-2xl font-bold text-text-primary">
               {newAnime
                 ? newAnime.title
-                : anime?.titleEnglish ?? anime?.titleRomaji}
+                : selectedMember?.titleEnglish ?? selectedMember?.titleRomaji ?? anime?.titleEnglish ?? anime?.titleRomaji}
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              {newAnime?.romajiTitle ?? anime?.titleRomaji}
+              {newAnime?.romajiTitle ?? selectedMember?.titleRomaji ?? anime?.titleRomaji}
             </p>
             <p className="mt-1 font-mono text-[11px] uppercase tracking-wider text-text-muted">{metadata}</p>
             <div className="mt-3 flex items-center gap-3">
@@ -741,16 +764,31 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                 <p className="p-6 text-sm text-text-muted">No episodes yet.</p>
               ) : (
                 detail &&
-                detail.episodes.map((episode) => (
+                detail.episodes.map((episode) => {
+                  const fetching = fetchingEpisodeIds.includes(episode.id);
+                  // Available → play. Un-downloaded but linked to Sonarr →
+                  // click fetches that single episode (Problem 5 follow-up).
+                  const canPlay = episode.available;
+                  const canFetch = !canPlay && selectedMember?.sonarrId != null && !fetching;
+                  return (
                   <div
                     key={episode.id}
+                    title={
+                      canPlay
+                        ? `Play EP ${episode.episodeNumber}`
+                        : canFetch
+                          ? `Search & download EP ${episode.episodeNumber}`
+                          : undefined
+                    }
                     className={`flex items-center gap-3 border-b border-border px-6 py-3 ${
-                      episode.available ? "cursor-pointer transition-colors hover:bg-surface-hover" : ""
+                      canPlay || canFetch ? "cursor-pointer transition-colors hover:bg-surface-hover" : ""
                     }`}
                     onClick={() => {
-                      if (episode.available) {
+                      if (canPlay) {
                         onClose();
                         void play(episode.id);
+                      } else if (canFetch) {
+                        void onFetchEpisode(episode.id);
                       }
                     }}
                   >
@@ -771,47 +809,50 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-text-primary">{episode.title ?? `Episode ${episode.episodeNumber}`}</p>
-                      <p className="text-xs text-text-muted">{episodeStatusText({ ...episode, watched: isWatched(episode) })}</p>
+                      <p className="text-xs text-text-muted">
+                        {fetching
+                          ? "Searching…"
+                          : episodeStatusText({ ...episode, watched: isWatched(episode) })}
+                      </p>
                     </div>
                     <span className="shrink-0 font-mono text-xs text-text-muted">
                       {formatDuration(episode.durationSeconds)}
                     </span>
-                    {episode.available && (
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          title={isWatched(episode) ? `Unmark EP ${episode.episodeNumber}` : `Mark EP ${episode.episodeNumber} watched`}
-                          aria-label={`Toggle episode ${episode.episodeNumber} watched`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void (episode.watched ? onUnwatch(episode.id) : onMarkWatched(episode.id));
-                          }}
-                          className={`rounded-lg p-1.5 transition-colors ${
-                            isWatched(episode)
-                              ? "text-success"
-                              : "text-text-muted hover:bg-surface-hover hover:text-success"
-                          }`}
-                        >
-                          <Check className="h-4 w-4" aria-hidden />
-                        </button>
-                        <button
-                          title={isWatched(episode) ? `Unmark through EP ${episode.episodeNumber}` : `Mark through EP ${episode.episodeNumber} watched`}
-                          aria-label={`Toggle all episodes up to ${episode.episodeNumber} watched`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void (episode.watched ? onUnwatchThrough(episode.id) : onMarkWatchedThrough(episode.id));
-                          }}
-                          className={`rounded-lg p-1.5 transition-colors ${
-                            isWatched(episode)
-                              ? "text-success"
-                              : "text-text-muted hover:bg-surface-hover hover:text-success"
-                          }`}
-                        >
-                          <CheckCheck className="h-4 w-4" aria-hidden />
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        title={isWatched(episode) ? `Unmark EP ${episode.episodeNumber}` : `Mark EP ${episode.episodeNumber} watched`}
+                        aria-label={`Toggle episode ${episode.episodeNumber} watched`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void (episode.watched ? onUnwatch(episode.id) : onMarkWatched(episode.id));
+                        }}
+                        className={`rounded-lg p-1.5 transition-colors ${
+                          isWatched(episode)
+                            ? "text-success"
+                            : "text-text-muted hover:bg-surface-hover hover:text-success"
+                        }`}
+                      >
+                        <Check className="h-4 w-4" aria-hidden />
+                      </button>
+                      <button
+                        title={isWatched(episode) ? `Unmark through EP ${episode.episodeNumber}` : `Mark through EP ${episode.episodeNumber} watched`}
+                        aria-label={`Toggle all episodes up to ${episode.episodeNumber} watched`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void (episode.watched ? onUnwatchThrough(episode.id) : onMarkWatchedThrough(episode.id));
+                        }}
+                        className={`rounded-lg p-1.5 transition-colors ${
+                          isWatched(episode)
+                            ? "text-success"
+                            : "text-text-muted hover:bg-surface-hover hover:text-success"
+                        }`}
+                      >
+                        <CheckCheck className="h-4 w-4" aria-hidden />
+                      </button>
+                    </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </>

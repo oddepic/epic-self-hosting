@@ -17,10 +17,16 @@ export interface SeasonSummary {
 export interface FranchiseMemberInfo {
   id: number;
   title: string;
+  titleRomaji: string;
+  titleEnglish: string | null;
   status: Anime["status"];
   score: number | null;
   watchedEpisodes: number;
   episodeCount: number | null;
+  format: string | null;
+  seasonYear: number | null;
+  coverImageUrl: string | null;
+  bannerImageUrl: string | null;
   sonarrId: number | null;
   entrySeasonNumber: number | null;
 }
@@ -67,10 +73,16 @@ export class AnimeDetailService {
     const members: FranchiseMemberInfo[] = franchise.members.map((member) => ({
       id: member.anime.id,
       title: member.anime.titleEnglish ?? member.anime.titleRomaji,
+      titleRomaji: member.anime.titleRomaji,
+      titleEnglish: member.anime.titleEnglish,
       status: member.anime.status,
       score: member.anime.score,
       watchedEpisodes: member.anime.watchedEpisodes,
       episodeCount: member.anime.episodeCount,
+      format: member.anime.format,
+      seasonYear: member.anime.seasonYear,
+      coverImageUrl: member.anime.coverImageUrl,
+      bannerImageUrl: member.anime.bannerImageUrl,
       sonarrId: member.anime.sonarrId,
       entrySeasonNumber: member.entrySeasonNumber,
     }));
