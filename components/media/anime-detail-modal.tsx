@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCheck, ChevronDown, Play, X } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, Download, Loader2, Play, X } from "lucide-react";
 import Button from "@/components/ui/button";
 import { usePlayer } from "@/components/player/player-provider";
 import type { AnimeDetail } from "@/lib/services/anime-detail-service";
@@ -766,29 +766,16 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                 detail &&
                 detail.episodes.map((episode) => {
                   const fetching = fetchingEpisodeIds.includes(episode.id);
-                  // Available → play. Un-downloaded but linked to Sonarr →
-                  // click fetches that single episode (Problem 5 follow-up).
-                  const canPlay = episode.available;
-                  const canFetch = !canPlay && selectedMember?.sonarrId != null && !fetching;
                   return (
                   <div
                     key={episode.id}
-                    title={
-                      canPlay
-                        ? `Play EP ${episode.episodeNumber}`
-                        : canFetch
-                          ? `Search & download EP ${episode.episodeNumber}`
-                          : undefined
-                    }
                     className={`flex items-center gap-3 border-b border-border px-6 py-3 ${
-                      canPlay || canFetch ? "cursor-pointer transition-colors hover:bg-surface-hover" : ""
+                      episode.available ? "cursor-pointer transition-colors hover:bg-surface-hover" : ""
                     }`}
                     onClick={() => {
-                      if (canPlay) {
+                      if (episode.available) {
                         onClose();
                         void play(episode.id);
-                      } else if (canFetch) {
-                        void onFetchEpisode(episode.id);
                       }
                     }}
                   >
@@ -818,38 +805,59 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                     <span className="shrink-0 font-mono text-xs text-text-muted">
                       {formatDuration(episode.durationSeconds)}
                     </span>
-                    <div className="flex shrink-0 items-center gap-1">
+                    {episode.available ? (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          title={isWatched(episode) ? `Unmark EP ${episode.episodeNumber}` : `Mark EP ${episode.episodeNumber} watched`}
+                          aria-label={`Toggle episode ${episode.episodeNumber} watched`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void (episode.watched ? onUnwatch(episode.id) : onMarkWatched(episode.id));
+                          }}
+                          className={`rounded-lg p-1.5 transition-colors ${
+                            isWatched(episode)
+                              ? "text-success"
+                              : "text-text-muted hover:bg-surface-hover hover:text-success"
+                          }`}
+                        >
+                          <Check className="h-4 w-4" aria-hidden />
+                        </button>
+                        <button
+                          title={isWatched(episode) ? `Unmark through EP ${episode.episodeNumber}` : `Mark through EP ${episode.episodeNumber} watched`}
+                          aria-label={`Toggle all episodes up to ${episode.episodeNumber} watched`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void (episode.watched ? onUnwatchThrough(episode.id) : onMarkWatchedThrough(episode.id));
+                          }}
+                          className={`rounded-lg p-1.5 transition-colors ${
+                            isWatched(episode)
+                              ? "text-success"
+                              : "text-text-muted hover:bg-surface-hover hover:text-success"
+                          }`}
+                        >
+                          <CheckCheck className="h-4 w-4" aria-hidden />
+                        </button>
+                      </div>
+                    ) : selectedMember?.sonarrId != null ? (
+                      // Un-downloaded + linked to Sonarr: fetch this single
+                      // episode. Disappears once the file exists (by any means).
                       <button
-                        title={isWatched(episode) ? `Unmark EP ${episode.episodeNumber}` : `Mark EP ${episode.episodeNumber} watched`}
-                        aria-label={`Toggle episode ${episode.episodeNumber} watched`}
+                        title={`Search & download EP ${episode.episodeNumber}`}
+                        aria-label={`Search & download episode ${episode.episodeNumber}`}
+                        disabled={fetching}
                         onClick={(e) => {
                           e.stopPropagation();
-                          void (episode.watched ? onUnwatch(episode.id) : onMarkWatched(episode.id));
+                          void onFetchEpisode(episode.id);
                         }}
-                        className={`rounded-lg p-1.5 transition-colors ${
-                          isWatched(episode)
-                            ? "text-success"
-                            : "text-text-muted hover:bg-surface-hover hover:text-success"
-                        }`}
+                        className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <Check className="h-4 w-4" aria-hidden />
+                        {fetching ? (
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                        ) : (
+                          <Download className="h-4 w-4" aria-hidden />
+                        )}
                       </button>
-                      <button
-                        title={isWatched(episode) ? `Unmark through EP ${episode.episodeNumber}` : `Mark through EP ${episode.episodeNumber} watched`}
-                        aria-label={`Toggle all episodes up to ${episode.episodeNumber} watched`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void (episode.watched ? onUnwatchThrough(episode.id) : onMarkWatchedThrough(episode.id));
-                        }}
-                        className={`rounded-lg p-1.5 transition-colors ${
-                          isWatched(episode)
-                            ? "text-success"
-                            : "text-text-muted hover:bg-surface-hover hover:text-success"
-                        }`}
-                      >
-                        <CheckCheck className="h-4 w-4" aria-hidden />
-                      </button>
-                    </div>
+                    ) : null}
                   </div>
                   );
                 })
