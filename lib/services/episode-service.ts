@@ -40,6 +40,12 @@ function episodeEntryPosition(
 // entry position instead of adding 1 for every episode — otherwise episodes
 // already counted by the MAL sync (e.g. watchedEpisodes = 11) would be counted
 // a second time when their checkmarks are marked (11 + 11 = 22).
+//
+// D1 (specials policy): S0 specials never move the counter — they are a
+// separate scale. More generally, any episode whose season cannot be mapped to
+// the entry (episodeEntryPosition == null while entry total is known) is
+// treated as non-advancing: marking or unmarking it leaves watchedEpisodes
+// unchanged. This prevents the P4 leak (7 + 28 = 35, 28 → 38, 11 → 12).
 function bumpWatchedCounter(
   db: Db,
   animeId: number,
@@ -48,15 +54,22 @@ function bumpWatchedCounter(
 ): void {
   const anime = db.select().from(animes).where(eq(animes.id, animeId)).get();
   if (!anime) return;
-  if (delta > 0 && episode) {
+  if (episode) {
     const position = episodeEntryPosition(db, anime, episode);
     if (position != null) {
-      db.update(animes)
-        .set({ watchedEpisodes: Math.max(anime.watchedEpisodes, position) })
-        .where(eq(animes.id, animeId))
-        .run();
+      if (delta > 0) {
+        db.update(animes)
+          .set({ watchedEpisodes: Math.max(anime.watchedEpisodes, position) })
+          .where(eq(animes.id, animeId))
+          .run();
+      } else if (delta < 0) {
+        const next = Math.max(0, anime.watchedEpisodes + delta);
+        db.update(animes).set({ watchedEpisodes: next }).where(eq(animes.id, animeId)).run();
+      }
       return;
     }
+    // No mapping and entry total is known → specials/foreign: do not move.
+    if (anime.episodeCount != null) return;
   }
   const next = Math.max(0, anime.watchedEpisodes + delta);
   db.update(animes).set({ watchedEpisodes: next }).where(eq(animes.id, animeId)).run();
@@ -120,7 +133,13 @@ export function unwatchThrough(db: Db, input: { episodeId: number }): number {
       unmarked++;
     }
   });
-  if (unmarked > 0) bumpWatchedCounter(db, targetSeason.animeId, undefined, -unmarked);
+  if (unmarked > 0) {
+    const anime = db.select().from(animes).where(eq(animes.id, targetSeason.animeId)).get();
+    const targetPos = anime ? episodeEntryPosition(db, anime, target) : null;
+    if (anime?.episodeCount == null || targetPos != null) {
+      bumpWatchedCounter(db, targetSeason.animeId, undefined, -unmarked);
+    }
+  }
   return unmarked;
 }
 

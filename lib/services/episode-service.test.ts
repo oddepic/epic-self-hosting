@@ -96,8 +96,10 @@ describe("completeEpisode", () => {
     expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(1156);
   });
 
-  it("keeps +1 on season-scoped entries whose absolute numbers exceed the total", () => {
-    // Re:ZERO 4th Season-style: entry total 19, S4E02 absolute 68.
+  it("does not advance the counter for specials/foreign seasons (P4, D1)", () => {
+    // Re:ZERO 4th Season-style: entry total 19, but season has only 1 episode
+    // (count 1 != 19) so it cannot be mapped to the entry — treated as
+    // specials/foreign and must not move the position counter.
     const animeId = db.insert(animes).values({
       anilistId: 999_002,
       titleRomaji: "Scoped Entry",
@@ -116,7 +118,7 @@ describe("completeEpisode", () => {
 
     completeEpisode(db, { episodeId: ep.id, userId, positionSeconds: 100, now: () => 1 });
 
-    expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(1);
+    expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(0);
   });
 });
 
@@ -282,5 +284,42 @@ describe("entry counter reconciliation (season-scoped entry)", () => {
     completeEpisode(db, { episodeId: epIds[4]!, userId, positionSeconds: 100, now: () => 1000 });
 
     expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(11);
+  });
+
+  it("does not inflate when marking through specials/foreign (P4)", () => {
+    // S0 specials (9 eps) under the same 13-ep entry: count 9 != 13 → must not move.
+    const specialsSeason = db.insert(seasons).values({ animeId, number: 0 }).returning().get().id;
+    const specialsIds: number[] = [];
+    for (let n = 1; n <= 9; n++) {
+      specialsIds.push(
+        db
+          .insert(episodes)
+          .values({ seasonId: specialsSeason, episodeNumber: n, absoluteNumber: null, progressSeconds: 0 })
+          .returning()
+          .get().id,
+      );
+    }
+    completeEpisode(db, { episodeId: specialsIds[0]!, userId, positionSeconds: 100, now: () => 1000 });
+    expect(db.select().from(animes).where(eq(animes.id, animeId)).get()!.watchedEpisodes).toBe(11);
+
+    // Foreign season S1 (28 eps) under a 10-ep entry: +28 must not become 35.
+    const foreignAnime = db
+      .insert(animes)
+      .values({ anilistId: 999_011, titleRomaji: "Foreign", status: "watching", episodeCount: 10, watchedEpisodes: 7, createdAt: 1, updatedAt: 1 })
+      .returning()
+      .get().id;
+    const foreignSeason = db.insert(seasons).values({ animeId: foreignAnime, number: 1 }).returning().get().id;
+    const foreignIds: number[] = [];
+    for (let n = 1; n <= 28; n++) {
+      foreignIds.push(
+        db
+          .insert(episodes)
+          .values({ seasonId: foreignSeason, episodeNumber: n, absoluteNumber: n, progressSeconds: 0 })
+          .returning()
+          .get().id,
+      );
+    }
+    completeEpisodeThrough(db, { episodeId: foreignIds[27]!, userId, now: () => 1000 });
+    expect(db.select().from(animes).where(eq(animes.id, foreignAnime)).get()!.watchedEpisodes).toBe(7);
   });
 });
