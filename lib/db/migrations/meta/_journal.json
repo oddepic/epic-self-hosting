@@ -50,6 +50,13 @@
       "when": 1787064750658,
       "tag": "0006_dry_hannibal_king",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787327368990,
+      "tag": "0007_franchise_season_year",
+      "breakpoints": true
     }
   ]
 }

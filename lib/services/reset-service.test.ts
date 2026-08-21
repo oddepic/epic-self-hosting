@@ -34,6 +34,7 @@ function fakeSonarr(): SonarrClient & { deleted: { id: number; deleteFiles: bool
     async getEpisodes() {
       return [];
     },
+    async setEpisodesMonitored() {},
     async getQueue() {
       return [];
     },

@@ -63,6 +63,10 @@ export const seasons = sqliteTable("seasons", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   animeId: integer("anime_id").notNull().references(() => animes.id),
   number: integer("number").notNull(),
+  // First-air year of the season (from Sonarr episode air dates). Used to map
+  // MAL entries to their season (entry start year match) — see
+  // franchise-service.resolveEntrySeason.
+  year: integer("year"),
 }, (t) => [uniqueIndex("seasons_anime_number_unique").on(t.animeId, t.number)]);
 
 export const episodes = sqliteTable("episodes", {

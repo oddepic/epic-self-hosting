@@ -1,37 +1,35 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { animes, episodes, playbackHistory, seasons } from "../db/schema";
+import { animes, episodes, playbackHistory, seasons, type Anime } from "../db/schema";
+import { resolveEntrySeason } from "./franchise-service";
 
 export function formatEpisodeLabel(seasonNumber: number, episodeNumber: number): string {
   return `S${String(seasonNumber).padStart(2, "0")}E${String(episodeNumber).padStart(2, "0")}`;
 }
 
 // An episode's position within its MAL entry — the scale the entry-level
-// watchedEpisodes counter lives on. Two shapes exist:
-//   - Entries that ARE one season (Rascal 2026, Re:ZERO 4th Season: the
-//     entry's total equals the season's episode count) use the season-local
-//     episode number. The franchise-wide absolute number is NOT used here —
-//     Seishun Buta S2E11 is absolute 27 but episode 11 of its 13-ep entry.
+// watchedEpisodes counter lives on. The entry's season is resolved via the
+// franchise mapping (premiere-year match, count-coincidence fallback; see
+// franchise-service.resolveEntrySeason):
+//   - Season-scoped entries (Rascal 2026, Re:ZERO 4th Season) use the
+//     season-local episode number. The franchise-wide absolute number is NOT
+//     used — Seishun Buta S2E11 is absolute 27 but episode 11 of its 13-ep
+//     entry.
 //   - Whole-franchise entries (One Piece: entry total unknown) use the
 //     absolute number, which is 1-based across the whole series.
-// When neither applies the position is unknown and the caller falls back.
+// Episodes outside the entry's season (specials, other entries' seasons)
+// have no entry position (D1: they never move the counter).
 function episodeEntryPosition(
   db: Db,
-  anime: { episodeCount: number | null },
+  anime: Anime,
   episode: typeof episodes.$inferSelect,
 ): number | null {
-  if (anime.episodeCount != null) {
-    const season = db.select().from(seasons).where(eq(seasons.id, episode.seasonId)).get();
-    if (!season) return null;
-    const count =
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(episodes)
-        .where(eq(episodes.seasonId, season.id))
-        .get()?.count ?? 0;
-    return count === anime.episodeCount ? episode.episodeNumber : null;
+  if (anime.episodeCount == null) {
+    return episode.absoluteNumber;
   }
-  return episode.absoluteNumber;
+  const entrySeason = resolveEntrySeason(db, anime);
+  if (!entrySeason) return null;
+  return episode.seasonId === entrySeason.id ? episode.episodeNumber : null;
 }
 
 // Entry-level watched counter: MAL counts watched episodes as a POSITION

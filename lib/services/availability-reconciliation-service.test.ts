@@ -60,6 +60,7 @@ function fakeSonarr(rescanSeries: (seriesId: number) => void): SonarrClient {
     async getEpisodes() {
       return [];
     },
+    async setEpisodesMonitored() {},
     async getQueue() {
       return [];
     },

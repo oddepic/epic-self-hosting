@@ -21,6 +21,7 @@ function fakeSonarr(series: SonarrSeries[], disks: { path: string; freeSpace: nu
     async getEpisodes() {
       return [];
     },
+    async setEpisodesMonitored() {},
     async getQueue() {
       return [];
     },

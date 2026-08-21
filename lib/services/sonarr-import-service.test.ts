@@ -29,6 +29,7 @@ function fakeSonarr(items: ManualImportItemDto[]): SonarrClient & { imported: un
     async getEpisodes() {
       return [];
     },
+    async setEpisodesMonitored() {},
     async getQueue() {
       return [];
     },

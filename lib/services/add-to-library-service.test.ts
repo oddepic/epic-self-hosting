@@ -86,11 +86,12 @@ function fakeSonarr(
     },
     async getEpisodes() {
       return [
-        { id: 101, seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: 1, title: null },
-        { id: 102, seasonNumber: 1, episodeNumber: 2, absoluteEpisodeNumber: 2, title: null },
-        { id: 201, seasonNumber: 2, episodeNumber: 1, absoluteEpisodeNumber: 26, title: null },
+        { id: 101, seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: 1, title: null, airYear: null },
+        { id: 102, seasonNumber: 1, episodeNumber: 2, absoluteEpisodeNumber: 2, title: null, airYear: null },
+        { id: 201, seasonNumber: 2, episodeNumber: 1, absoluteEpisodeNumber: 26, title: null, airYear: null },
       ];
     },
+    async setEpisodesMonitored() {},
     async getQueue() {
       return [];
     },

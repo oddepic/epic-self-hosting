@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCheck, Play, X } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, Play, X } from "lucide-react";
 import Button from "@/components/ui/button";
 import { usePlayer } from "@/components/player/player-provider";
 import type { AnimeDetail } from "@/lib/services/anime-detail-service";
@@ -78,8 +78,8 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     }
   });
   const loadGenerationRef = useRef(0);
-  const malSyncedAnimeRef = useRef<number | null>(null);
   const [changingStatus, setChangingStatus] = useState(false);
+  const [fetchingMissing, setFetchingMissing] = useState(false);
   const [addState, setAddState] = useState<{
     phase: "checking" | "confirm" | "added";
     candidates: SonarrCandidate[] | null;
@@ -109,27 +109,39 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     if (animeId != null) void load();
   }, [load, animeId]);
 
-  // Pull only this anime's current MAL status when opening its modal. This
-  // keeps progress/score current without fetching the user's entire list.
+  // Pull each franchise member's current MAL state when it becomes relevant
+  // (the clicked entry on open, plus the entry bound to the displayed season
+  // when the user switches seasons). Once per entry per modal session.
+  const malSyncedRef = useRef<Set<number>>(new Set());
   useEffect(() => {
-    if (animeId == null || malSyncedAnimeRef.current === animeId) return;
-    malSyncedAnimeRef.current = animeId;
+    if (animeId == null) return;
+    const ids = [animeId, ...(detail?.selectedEntryId != null ? [detail.selectedEntryId] : [])].filter(
+      (id) => !malSyncedRef.current.has(id),
+    );
+    if (ids.length === 0) return;
+    for (const id of ids) malSyncedRef.current.add(id);
     void (async () => {
-      try {
-        const response = await fetch("/api/library/mal-sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ animeId }),
-        });
-        if (response.ok) {
-          const body = (await response.json()) as { synced?: boolean };
-          if (body.synced) void load();
-        }
-      } catch {
-        // Keep local detail data when MAL is unavailable.
-      }
+      let syncedAny = false;
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const response = await fetch("/api/library/mal-sync", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ animeId: id }),
+            });
+            if (response.ok) {
+              const body = (await response.json()) as { synced?: boolean };
+              if (body.synced) syncedAny = true;
+            }
+          } catch {
+            // Keep local detail data when MAL is unavailable.
+          }
+        }),
+      );
+      if (syncedAny) void load();
     })();
-  }, [animeId, load]);
+  }, [animeId, detail?.selectedEntryId, load]);
 
   // The lazy initializer only covers the first mount; when the modal switches
   // to a different anime while mounted, restore that anime's persisted season.
@@ -169,37 +181,34 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   const newAnime = animeId == null ? item : null;
   const anime = detail?.anime ?? null;
 
-  // Progress (watched episodes) for the MAL entry, editable next to the
-  // status. MAL counts across ALL seasons of a single entry (One Piece,
-  // Naruto…), so this is the anime's entry-level counter — not the viewed
-  // season's flag count.
+  // Franchise modal: header controls bind to the ENTRY that owns the displayed
+  // season (each season keeps its own MAL status/score/progress); specials
+  // belong to no entry and fall back to the clicked one.
+  const selectedMember = detail?.members.find((m) => m.id === detail.selectedEntryId) ?? null;
+
   const seasonEpisodes = detail?.episodes ?? [];
-  const progressCount = anime?.watchedEpisodes ?? 0;
-  const entryTotal = anime?.episodeCount ?? null;
+  const progressCount = selectedMember?.watchedEpisodes ?? 0;
+  const entryTotal = selectedMember?.episodeCount ?? null;
 
-  // The season currently shown, used to reconcile the entry-level MAL counter
-  // with the per-episode checkmarks (below).
-  const selectedSeasonNumber =
-    season ?? detail?.resume?.seasonNumber ?? detail?.seasons[0]?.number ?? null;
+  // Displayed season: explicit pick ?? server default (the entry's mapped
+  // season ?? resume ?? first with content).
+  const displayedSeasonNumber =
+    season ?? detail?.selectedSeasonNumber ?? detail?.resume?.seasonNumber ?? detail?.seasons[0]?.number ?? null;
   const selectedSeasonSummary =
-    detail?.seasons.find((s) => s.number === selectedSeasonNumber) ?? null;
+    detail?.seasons.find((s) => s.number === displayedSeasonNumber) ?? null;
 
-  // An episode reads as "watched" when its flag is set OR when the entry
-  // counter already covers it. MAL sync only writes the entry counter, never
-  // individual flags, so without this the checkmarks would look blank even
-  // though progress says 11/13. Must mirror episode-service's resolution:
-  // when the displayed season IS the entry (its episode count equals the
-  // entry total) the season-local episode number is the entry position;
-  // otherwise whole-franchise entries (One Piece) use the absolute number.
+  // An episode reads as "watched" when its flag is set OR when the owning
+  // entry's counter covers it. Uses the stored entry↔season mapping (the
+  // member's entrySeasonNumber) — mirroring episode-service.
   const isWatched = (episode: {
     watched: boolean;
     episodeNumber: number;
     absoluteNumber: number | null;
   }): boolean => {
     if (episode.watched) return true;
-    if (anime == null) return false;
+    if (selectedMember == null) return false;
     if (entryTotal != null) {
-      if (selectedSeasonSummary?.totalCount === entryTotal) {
+      if (selectedMember.entrySeasonNumber != null && selectedMember.entrySeasonNumber === displayedSeasonNumber) {
         return episode.episodeNumber <= Math.min(progressCount, entryTotal);
       }
       return false;
@@ -209,7 +218,33 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
 
   const nextUnwatched = seasonEpisodes.find((e) => !isWatched(e)) ?? null;
   const showProgress =
-    anime != null && !newAnime && anime.status !== "completed" && anime.status !== "plan_to_watch";
+    selectedMember != null && !newAnime && selectedMember.status !== "completed" && selectedMember.status !== "plan_to_watch";
+
+  // Per-season download for an added franchise (Bug 06 Problem 5): the season
+  // has un-downloaded episodes and the entry is linked to Sonarr.
+  const canGetMissing =
+    selectedMember?.sonarrId != null &&
+    selectedSeasonSummary != null &&
+    selectedSeasonSummary.totalCount > 0 &&
+    selectedSeasonSummary.availableCount < selectedSeasonSummary.totalCount;
+
+  async function onGetMissing() {
+    const seriesId = selectedMember?.sonarrId;
+    if (seriesId == null || displayedSeasonNumber == null) return;
+    setFetchingMissing(true);
+    try {
+      await fetch("/api/sonarr/search-season", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seriesId, season: displayedSeasonNumber }),
+      });
+    } catch {
+      // The view still reloads below; Sonarr failures surface on next poll.
+    }
+    setFetchingMissing(false);
+    void load();
+    onChanged();
+  }
 
   useEffect(() => {
     setProgressInput(String(progressCount));
@@ -264,19 +299,21 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
           anime.format,
           anime.seasonYear ? String(anime.seasonYear) : null,
           anime.episodeCount ? `${anime.episodeCount} eps` : null,
-          STATUS_LABELS[anime.status],
+          // The selected season's entry status — it changes with the dropdown.
+          selectedMember ? STATUS_LABELS[selectedMember.status] : null,
         ]
           .filter(Boolean)
           .join(" · ")
       : "";
 
-  async function onChangeStatus(status: string) {
-    if (animeId == null) return;
+  async function onChangeStatus(status: string, targetAnimeId?: number) {
+    const id = targetAnimeId ?? animeId;
+    if (id == null) return;
     setChangingStatus(true);
     const res = await fetch("/api/library/status", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ animeId, status }),
+      body: JSON.stringify({ animeId: id, status }),
     });
     setChangingStatus(false);
     if (res.ok) {
@@ -285,13 +322,14 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     }
   }
 
-  async function onChangeScore(score: number) {
-    if (animeId == null) return;
+  async function onChangeScore(score: number, targetAnimeId?: number) {
+    const id = targetAnimeId ?? animeId;
+    if (id == null) return;
     setChangingStatus(true);
     const res = await fetch("/api/library/score", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ animeId, score }),
+      body: JSON.stringify({ animeId: id, score }),
     });
     setChangingStatus(false);
     if (res.ok) {
@@ -410,7 +448,8 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   const addPhase = addState?.phase ?? derivedAddPhase;
 
   async function onCommitProgress(value: string) {
-    if (animeId == null) return;
+    const id = selectedMember?.id ?? animeId;
+    if (id == null) return;
     const n = Math.round(Number(value));
     if (!Number.isFinite(n) || n < 0) {
       setProgressInput(String(progressCount));
@@ -429,7 +468,7 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        animeId,
+        animeId: id,
         watchedEpisodes: clamped,
         ...(flagTarget ? { episodeId: flagTarget.id } : {}),
       }),
@@ -508,12 +547,12 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                   Added
                 </Button>
               )}
-              {anime && !newAnime && (
+              {selectedMember && !newAnime && (
                 <>
                   <select
                     name="status"
-                    value={anime.status}
-                    onChange={(e) => void onChangeStatus(e.target.value)}
+                    value={selectedMember.status}
+                    onChange={(e) => void onChangeStatus(e.target.value, selectedMember.id)}
                     disabled={changingStatus}
                     className="rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary disabled:opacity-50"
                   >
@@ -526,8 +565,8 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                   <span className="text-text-muted/60" aria-hidden>|</span>
                   <select
                     name="score"
-                    value={anime.score ?? 0}
-                    onChange={(e) => void onChangeScore(Number(e.target.value))}
+                    value={selectedMember.score ?? 0}
+                    onChange={(e) => void onChangeScore(Number(e.target.value), selectedMember.id)}
                     disabled={changingStatus}
                     aria-label="Score"
                     className="rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-primary disabled:opacity-50"
@@ -680,18 +719,20 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
           <>
             {detail && detail.seasons.length > 0 && (
               <div className="flex items-center gap-2 border-b border-border px-6 py-3">
-                <select
-                  name="season"
-                  value={season ?? detail.resume?.seasonNumber ?? detail.seasons[0]!.number}
-                  onChange={(e) => onPickSeason(Number(e.target.value))}
-                  className="rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-sm text-text-primary"
-                >
-                  {detail.seasons.map((s) => (
-                    <option key={s.number} value={s.number}>
-                      Season {s.number} · {s.availableCount}/{s.totalCount} downloaded
-                    </option>
-                  ))}
-                </select>
+                <SeasonSelect
+                  seasons={detail.seasons}
+                  value={displayedSeasonNumber}
+                  onSelect={onPickSeason}
+                />
+                {canGetMissing && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => void onGetMissing()}
+                    disabled={fetchingMissing}
+                  >
+                    {fetchingMissing ? "Searching…" : "Get missing episodes"}
+                  </Button>
+                )}
               </div>
             )}
 
@@ -776,6 +817,77 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// Custom season dropdown for the franchise modal: one list of every season in
+// the franchise (specials labeled), with per-season download counts. A native
+// select cannot carry the richer per-row labels.
+function SeasonSelect({
+  seasons,
+  value,
+  onSelect,
+}: {
+  seasons: Array<{ number: number; availableCount: number; totalCount: number; isSpecials: boolean }>;
+  value: number | null;
+  onSelect: (number_: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open]);
+
+  const label = (season: { number: number; availableCount: number; totalCount: number; isSpecials: boolean }) =>
+    `${season.isSpecials ? "Specials" : `Season ${season.number}`} · ${season.availableCount}/${season.totalCount} downloaded`;
+  const current = seasons.find((s) => s.number === value) ?? null;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-surface-hover"
+      >
+        <span>{current ? label(current) : "Select season"}</span>
+        <ChevronDown className="h-4 w-4 text-text-muted" aria-hidden />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Seasons"
+          className="absolute z-10 mt-1 max-h-72 w-64 overflow-y-auto rounded-lg border border-border bg-surface-raised py-1"
+        >
+          {seasons.map((season) => (
+            <button
+              key={season.number}
+              type="button"
+              role="option"
+              aria-selected={season.number === value}
+              onClick={() => {
+                onSelect(season.number);
+                setOpen(false);
+              }}
+              className={`block w-full px-3 py-2 text-left text-sm transition-colors hover:bg-surface-hover ${
+                season.number === value ? "text-accent" : "text-text-secondary"
+              }`}
+            >
+              {label(season)}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

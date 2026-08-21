@@ -60,6 +60,9 @@ export interface SonarrEpisode {
   absoluteEpisodeNumber: number | null;
   title: string | null;
   hasFile?: boolean;
+  // Year parsed from the episode's airDateUtc (null when unaired/unknown).
+  // Used to stamp seasons.year for entry↔season mapping.
+  airYear: number | null;
 }
 
 export interface SonarrSeries {
@@ -108,6 +111,7 @@ export interface SonarrClient {
   triggerImport(files: unknown[]): Promise<{ id: number }>;
   getMissingMonitoredBySeries(): Promise<{ seriesId: number; episodeIds: number[] }[]>;
   searchEpisodes(episodeIds: number[]): Promise<{ id: number }>;
+  setEpisodesMonitored(episodeIds: number[], monitored: boolean): Promise<void>;
   rescanSeries(seriesId: number): Promise<{ id: number }>;
   getCommandStatus(commandId: number): Promise<string>;
   getSeries(): Promise<SonarrSeries[]>;

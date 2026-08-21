@@ -39,6 +39,7 @@ function fakeSonarr(behavior: {
     async getEpisodes() {
       return [];
     },
+    async setEpisodesMonitored() {},
     async getQueue() {
       return [];
     },

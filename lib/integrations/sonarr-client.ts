@@ -30,6 +30,14 @@ interface SonarrEpisodeResource {
   absoluteEpisodeNumber: number | null;
   title: string | null;
   hasFile?: boolean;
+  airDateUtc?: string | null;
+}
+
+// "2025-11-20T15:00:00Z" → 2025; null when missing/unparsed.
+function parseAirYear(airDateUtc: string | null | undefined): number | null {
+  if (!airDateUtc) return null;
+  const year = Number.parseInt(airDateUtc.slice(0, 4), 10);
+  return Number.isFinite(year) ? year : null;
 }
 
 export class SonarrHttpClient implements SonarrClient {
@@ -91,7 +99,17 @@ export class SonarrHttpClient implements SonarrClient {
       absoluteEpisodeNumber: e.absoluteEpisodeNumber,
       title: e.title,
       hasFile: e.hasFile === true,
+      airYear: parseAirYear(e.airDateUtc),
     }));
+  }
+
+  async setEpisodesMonitored(episodeIds: number[], monitored: boolean): Promise<void> {
+    if (episodeIds.length === 0) return;
+    await this.request("/episode/monitor", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ episodeIds, monitored }),
+    });
   }
 
   async getQueue(): Promise<unknown[]> {

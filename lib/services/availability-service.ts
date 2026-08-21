@@ -154,6 +154,17 @@ export class AvailabilityService {
       if (anime.sonarrId != null && this.sonarr) {
         try {
           const sonarrEpisodes = await this.sonarr.getEpisodes(anime.sonarrId);
+          // Season premiere year = earliest episode air year. Drives the
+          // entry↔season mapping (franchise-service.resolveEntrySeason).
+          const airYearsBySeason = new Map<number, number>();
+          for (const ep of sonarrEpisodes) {
+            if (ep.airYear == null) continue;
+            const current = airYearsBySeason.get(ep.seasonNumber);
+            if (current == null || ep.airYear < current) {
+              airYearsBySeason.set(ep.seasonNumber, ep.airYear);
+            }
+          }
+
           const existingSeasons = seasonByAnime.get(anime.id) ?? [];
           if (existingSeasons.length === 0) {
             const bySeason = new Map<number, { id: number; episodeNumber: number; absoluteEpisodeNumber: number | null }[]>();
@@ -165,7 +176,7 @@ export class AvailabilityService {
             for (const [number, eps] of bySeason) {
               const season = this.db
                 .insert(seasons)
-                .values({ animeId: anime.id, number })
+                .values({ animeId: anime.id, number, year: airYearsBySeason.get(number) ?? null })
                 .returning()
                 .get();
               for (const ep of eps) {
@@ -186,6 +197,16 @@ export class AvailabilityService {
               allEpisodes.push(...this.db.select().from(episodes).where(eq(episodes.seasonId, season.id)).all());
             }
           } else {
+            // Backfill missing season years from Sonarr air dates (older rows
+            // predate the year column; the mapping needs them).
+            for (const season of existingSeasons) {
+              if (season.year != null) continue;
+              const year = airYearsBySeason.get(season.number);
+              if (year != null) {
+                this.db.update(seasons).set({ year }).where(eq(seasons.id, season.id)).run();
+                season.year = year;
+              }
+            }
             // Sonarr's episode list carries the TVDB titles (the same ones
             // its renamer uses). Backfill rows that have no real title yet;
             // existing titles are never overwritten and junk (series-name

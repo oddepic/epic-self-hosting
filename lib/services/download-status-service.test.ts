@@ -44,6 +44,7 @@ function fakeSonarr(behavior: { queue?: QueueRecord[]; series?: SonarrSeries[] }
     async getEpisodes() {
       return [];
     },
+    async setEpisodesMonitored() {},
     async getQueue() {
       return queue;
     },

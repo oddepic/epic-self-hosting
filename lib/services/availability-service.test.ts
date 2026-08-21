@@ -565,9 +565,9 @@ describe("AvailabilityService.sync", () => {
     db.update(episodes).set({ sonarrEpisodeId: 101 }).run();
     const sonarr = fakeSonarr();
     sonarr.getEpisodes = async () => [
-      { id: 101, seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: 1, title: null, hasFile: true },
-      { id: 999, seasonNumber: 1, episodeNumber: 2, absoluteEpisodeNumber: 2, title: null, hasFile: true },
-      { id: 102, seasonNumber: 1, episodeNumber: 3, absoluteEpisodeNumber: 3, title: null, hasFile: false },
+      { id: 101, seasonNumber: 1, episodeNumber: 1, absoluteEpisodeNumber: 1, title: null, hasFile: true, airYear: null },
+      { id: 999, seasonNumber: 1, episodeNumber: 2, absoluteEpisodeNumber: 2, title: null, hasFile: true, airYear: null },
+      { id: 102, seasonNumber: 1, episodeNumber: 3, absoluteEpisodeNumber: 3, title: null, hasFile: false, airYear: null },
     ];
     const jellyfin = fakeJellyfin();
     service = new AvailabilityService(db, jellyfin, sonarr, { rebuildDelayMs: 0 });
