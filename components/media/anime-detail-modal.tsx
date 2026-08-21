@@ -82,6 +82,10 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   const [fetchingMissing, setFetchingMissing] = useState(false);
   // Per-episode fetch in flight (Bug 06 Problem 5 follow-up).
   const [fetchingEpisodeIds, setFetchingEpisodeIds] = useState<number[]>([]);
+  // Episodes whose search was requested this session. They STAY locked
+  // (spinner + "Searching…") until actually available — the API returns as
+  // soon as Sonarr ACCEPTS the search, long before the download finishes.
+  const [requestedEpisodeIds, setRequestedEpisodeIds] = useState<number[]>([]);
   const [addState, setAddState] = useState<{
     phase: "checking" | "confirm" | "added";
     candidates: SonarrCandidate[] | null;
@@ -249,7 +253,8 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
   }
 
   async function onFetchEpisode(episodeId: number) {
-    if (fetchingEpisodeIds.includes(episodeId)) return;
+    if (fetchingEpisodeIds.includes(episodeId) || requestedEpisodeIds.includes(episodeId)) return;
+    setRequestedEpisodeIds((ids) => [...ids, episodeId]);
     setFetchingEpisodeIds((ids) => [...ids, episodeId]);
     try {
       await fetch("/api/sonarr/search-episode", {
@@ -258,7 +263,7 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
         body: JSON.stringify({ episodeId }),
       });
     } catch {
-      // Reload below regardless; availability catches up on the next sync.
+      // Keep the lock; the user can retry after reopening if Sonarr failed.
     }
     setFetchingEpisodeIds((ids) => ids.filter((id) => id !== episodeId));
     void load();
@@ -765,7 +770,13 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
               ) : (
                 detail &&
                 detail.episodes.map((episode) => {
-                  const fetching = fetchingEpisodeIds.includes(episode.id);
+                  // Pending = request in flight, OR already requested this
+                  // session and still not available (Sonarr accepted the
+                  // search; the download takes minutes). Locked until the
+                  // file exists.
+                  const fetching =
+                    fetchingEpisodeIds.includes(episode.id) ||
+                    (!episode.available && requestedEpisodeIds.includes(episode.id));
                   return (
                   <div
                     key={episode.id}
