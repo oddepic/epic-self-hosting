@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCheck, ChevronDown, Download, Loader2, Play, Sparkles, X } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, Download, Loader2, Play, X } from "lucide-react";
 import Button from "@/components/ui/button";
 import { usePlayer } from "@/components/player/player-provider";
 import type { AnimeDetail } from "@/lib/services/anime-detail-service";
@@ -77,8 +77,8 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
       return undefined;
     }
   });
-  // Specials are hidden from the season dropdown by default; the Sparkles
-  // toggle next to it (only rendered when the franchise has any) reveals them.
+  // Specials visibility in the season dropdown is a persisted user setting
+  // (Settings > Library > Show specials seasons).
   const [showSpecials, setShowSpecials] = useState(false);
   // MAL-only entries have no episode rows (nothing was ever downloaded or
   // synced); this reveals a virtual list built from the entry's episodeCount
@@ -155,6 +155,25 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
       if (syncedAny) void load();
     })();
   }, [animeId, detail?.selectedEntryId, load]);
+
+  // Load the persisted specials setting when the modal opens for an entry.
+  useEffect(() => {
+    if (animeId == null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings/library");
+        if (!res.ok) return;
+        const body = (await res.json()) as { showSpecials?: boolean };
+        if (!cancelled) setShowSpecials(body.showSpecials === true);
+      } catch {
+        // Keep the default (hidden) when the settings call fails.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [animeId]);
 
   // The lazy initializer only covers the first mount; when the modal switches
   // to a different anime while mounted, restore that anime's persisted season.
@@ -862,20 +881,6 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                   onSelect={onPickSeason}
                   showSpecials={showSpecials}
                 />
-                {detail.seasons.some((s) => s.isSpecials) && (
-                  <button
-                    type="button"
-                    title={showSpecials ? "Hide specials" : "Show specials"}
-                    aria-label={showSpecials ? "Hide specials" : "Show specials"}
-                    aria-pressed={showSpecials}
-                    onClick={() => setShowSpecials((v) => !v)}
-                    className={`rounded-lg p-1.5 transition-colors hover:bg-surface-hover ${
-                      showSpecials ? "text-accent" : "text-text-muted hover:text-text-primary"
-                    }`}
-                  >
-                    <Sparkles className="h-4 w-4" aria-hidden />
-                  </button>
-                )}
                 {canGetMissing && (
                   <Button
                     variant="secondary"

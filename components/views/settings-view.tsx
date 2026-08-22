@@ -48,6 +48,7 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
   const [sizeLimitSaving, setSizeLimitSaving] = useState(false);
   const [sizeLimitResult, setSizeLimitResult] = useState<string | null>(null);
   const [autoplayNext, setAutoplayNext] = useState(true);
+  const [showSpecials, setShowSpecials] = useState(false);
   const [skipInput, setSkipInput] = useState("5");
   const [skipSaving, setSkipSaving] = useState(false);
   const [skipResult, setSkipResult] = useState<string | null>(null);
@@ -98,6 +99,17 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
     void checkStatus();
     void loadSizeLimit();
     void loadPlayback();
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings/library");
+        if (res.ok) {
+          const body = (await res.json()) as { showSpecials?: boolean };
+          setShowSpecials(body.showSpecials === true);
+        }
+      } catch {
+        // keep default
+      }
+    })();
   }, [checkStatus, loadSizeLimit, loadPlayback, refreshSignal]);
 
   async function onSaveSizeLimit() {
@@ -214,6 +226,20 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
     }
   }
 
+  async function onToggleShowSpecials() {
+    const next = !showSpecials;
+    setShowSpecials(next);
+    try {
+      await fetch("/api/settings/library", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ showSpecials: next }),
+      });
+    } catch {
+      setShowSpecials(!next);
+    }
+  }
+
   async function onSaveSkipSeconds() {
     const seconds = Number(skipInput);
     if (!Number.isFinite(seconds) || seconds < 1 || seconds > 60) {
@@ -291,6 +317,18 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
             {skipSaving ? "Saving…" : "Save"}
           </Button>
           {skipResult && <span className="text-xs text-text-muted">{skipResult}</span>}
+        </SettingRow>
+      </SettingSection>
+
+      <SettingSection title="Library">
+        <SettingRow label="Show specials seasons" description="List specials (season 0) in the season dropdown of anime modals.">
+          <input
+            type="checkbox"
+            checked={showSpecials}
+            onChange={() => void onToggleShowSpecials()}
+            aria-label="Show specials seasons"
+            className="h-4 w-4 accent-accent"
+          />
         </SettingRow>
       </SettingSection>
 
