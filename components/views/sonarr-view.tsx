@@ -154,7 +154,7 @@ export default function SonarrView({ refreshSignal }: { refreshSignal?: number }
         <Card className="flex items-center gap-4 p-5">
           <Database className="h-6 w-6 text-accent" aria-hidden />
           <div>
-            <p className="font-mono text-[11px] uppercase tracking-wider text-text-muted">NAS free</p>
+            <p className="font-mono text-[11px] uppercase tracking-wider text-text-muted">Space left</p>
             <p className="mt-1 text-2xl font-semibold">{formatBytes(overview?.freeBytes ?? 0)}</p>
           </div>
         </Card>
