@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCheck, ChevronDown, Download, Loader2, Play, X } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, Download, Loader2, Play, Sparkles, X } from "lucide-react";
 import Button from "@/components/ui/button";
 import { usePlayer } from "@/components/player/player-provider";
 import type { AnimeDetail } from "@/lib/services/anime-detail-service";
@@ -77,6 +77,13 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
       return undefined;
     }
   });
+  // Specials are hidden from the season dropdown by default; the Sparkles
+  // toggle next to it (only rendered when the franchise has any) reveals them.
+  const [showSpecials, setShowSpecials] = useState(false);
+  // MAL-only entries have no episode rows (nothing was ever downloaded or
+  // synced); this reveals a virtual list built from the entry's episodeCount
+  // so episodes stay visible and markable before the series is added.
+  const [showVirtualEpisodes, setShowVirtualEpisodes] = useState(false);
   const loadGenerationRef = useRef(0);
   const [changingStatus, setChangingStatus] = useState(false);
   const [fetchingMissing, setFetchingMissing] = useState(false);
@@ -159,6 +166,8 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     } catch {
       setSeason(undefined);
     }
+    // Leaving the entry hides any revealed virtual list.
+    setShowVirtualEpisodes(false);
   }, [animeId]);
 
   // Drop a stale saved season (e.g. the season list changed) so the select
@@ -222,6 +231,34 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     return episode.absoluteNumber != null && episode.absoluteNumber <= progressCount;
   };
 
+  // Virtual episode rows for entries with no Sonarr link: Sonarr never synced
+  // rows for them, so placeholders are built from the entry's episodeCount.
+  // The counter is the only stored truth here, watched simply reads as
+  // "position reached". Only offered when the displayed member is MAL-only;
+  // added franchises get real rows from Sonarr sync instead.
+  const virtualEpisodeTotal =
+    !newAnime &&
+    detail != null &&
+    selectedMember != null &&
+    selectedMember.sonarrId == null &&
+    detail.episodes.length === 0 &&
+    (selectedMember.episodeCount ?? 0) > 0
+      ? selectedMember.episodeCount!
+      : null;
+  const virtualEpisodes: AnimeDetail["episodes"] | null =
+    virtualEpisodeTotal != null
+      ? Array.from({ length: virtualEpisodeTotal }, (_, i) => ({
+          id: -(i + 1),
+          episodeNumber: i + 1,
+          absoluteNumber: null,
+          title: null,
+          thumbnailUrl: null,
+          available: false,
+          watched: false,
+          progressSeconds: 0,
+          durationSeconds: null,
+        }))
+      : null;
   const nextUnwatched = seasonEpisodes.find((e) => !isWatched(e)) ?? null;
   const showProgress =
     selectedMember != null && !newAnime && selectedMember.status !== "completed" && selectedMember.status !== "plan_to_watch";
@@ -509,6 +546,78 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
     }
   }
 
+  // Virtual-row picking writes the entry counter directly (no flags exist):
+  // single check advances to the clicked position (never rewinds),
+  // unmark rewinds to just below the clicked row, double-check sets exactly N
+  // (it may rewind, mirroring setWatchedThrough on real flags).
+  async function onSetCounter(next: number) {
+    const id = selectedMember?.id;
+    if (id == null) return;
+    const res = await fetch("/api/episodes/set-watched", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ animeId: id, watchedEpisodes: next }),
+    });
+    if (res.ok) {
+      void load();
+      onChanged();
+    }
+  }
+
+
+  // Virtual list for not-added entries: same row geometry minus thumbnail,
+  // play, and download actions. Check / double-check / unmark write the entry
+  // counter through set-watched; there are no flags, so status reads purely
+  // from the position.
+  function renderVirtualEpisodes() {
+    if (!virtualEpisodes) return null;
+    return virtualEpisodes.map((episode) => {
+      const watched = progressCount >= episode.episodeNumber;
+      return (
+        <div key={episode.id} className="flex items-center gap-3 border-b border-border px-6 py-3">
+          <div className="h-14 w-24 shrink-0 rounded-lg bg-surface-hover" />
+          <span className="w-10 shrink-0 font-mono text-sm font-semibold text-accent">
+            {String(episode.episodeNumber).padStart(2, "0")}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm text-text-primary">Episode {episode.episodeNumber}</p>
+            <p className="text-xs text-text-muted">{watched ? "Watched" : "Not downloaded"}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              title={watched ? `Unmark EP ${episode.episodeNumber}` : `Mark EP ${episode.episodeNumber} watched`}
+              aria-label={`Toggle episode ${episode.episodeNumber} watched`}
+              onClick={(e) => {
+                e.stopPropagation();
+                void (watched
+                  ? onSetCounter(Math.max(0, Math.min(progressCount, episode.episodeNumber - 1)))
+                  : onSetCounter(Math.max(progressCount, episode.episodeNumber)));
+              }}
+              className={`rounded-lg p-1.5 transition-colors ${
+                watched ? "text-success" : "text-text-muted hover:bg-surface-hover hover:text-success"
+              }`}
+            >
+              <Check className="h-4 w-4" aria-hidden />
+            </button>
+            <button
+              title={watched ? `Unmark through EP ${episode.episodeNumber}` : `Mark through EP ${episode.episodeNumber} watched`}
+              aria-label={`Set watched count to ${episode.episodeNumber}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                void onSetCounter(episode.episodeNumber);
+              }}
+              className={`rounded-lg p-1.5 transition-colors ${
+                watched ? "text-success" : "text-text-muted hover:bg-surface-hover hover:text-success"
+              }`}
+            >
+              <CheckCheck className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        </div>
+      );
+    });
+  }
+
   async function onMarkNext() {
     if (!nextUnwatched) return;
     const res = await fetch("/api/episodes/watched", {
@@ -751,7 +860,22 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
                   seasons={detail.seasons}
                   value={displayedSeasonNumber}
                   onSelect={onPickSeason}
+                  showSpecials={showSpecials}
                 />
+                {detail.seasons.some((s) => s.isSpecials) && (
+                  <button
+                    type="button"
+                    title={showSpecials ? "Hide specials" : "Show specials"}
+                    aria-label={showSpecials ? "Hide specials" : "Show specials"}
+                    aria-pressed={showSpecials}
+                    onClick={() => setShowSpecials((v) => !v)}
+                    className={`rounded-lg p-1.5 transition-colors hover:bg-surface-hover ${
+                      showSpecials ? "text-accent" : "text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    <Sparkles className="h-4 w-4" aria-hidden />
+                  </button>
+                )}
                 {canGetMissing && (
                   <Button
                     variant="secondary"
@@ -766,7 +890,25 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
 
             <div className="flex-1 overflow-y-auto">
               {detail && detail.episodes.length === 0 ? (
-                <p className="p-6 text-sm text-text-muted">No episodes yet.</p>
+                virtualEpisodeTotal == null || !showVirtualEpisodes ? (
+                  <p className="px-6 py-3 text-sm text-text-muted">
+                    No episodes yet.
+                    {virtualEpisodeTotal != null && (
+                      <>
+                        {' '}
+                        <button
+                          type="button"
+                          onClick={() => setShowVirtualEpisodes(true)}
+                          className="text-accent hover:underline"
+                        >
+                          Show episodes anyway
+                        </button>
+                      </>
+                    )}
+                  </p>
+                ) : (
+                  renderVirtualEpisodes()
+                )
               ) : (
                 detail &&
                 detail.episodes.map((episode) => {
@@ -883,15 +1025,19 @@ export default function AnimeDetailModal({ animeId, item, onClose, onChanged }: 
 
 // Custom season dropdown for the franchise modal: one list of every season in
 // the franchise (specials labeled), with per-season download counts. A native
-// select cannot carry the richer per-row labels.
+// select cannot carry the richer per-row labels. Specials are filtered out of
+// the list unless showSpecials is set; a hidden specials season still renders
+// as the trigger label when it is the displayed value.
 function SeasonSelect({
   seasons,
   value,
   onSelect,
+  showSpecials = false,
 }: {
   seasons: Array<{ number: number; availableCount: number; totalCount: number; isSpecials: boolean }>;
   value: number | null;
   onSelect: (number_: number) => void;
+  showSpecials?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -929,7 +1075,7 @@ function SeasonSelect({
           aria-label="Seasons"
           className="absolute z-10 mt-1 max-h-72 w-64 overflow-y-auto rounded-lg border border-border bg-surface-raised py-1"
         >
-          {seasons.map((season) => (
+          {seasons.filter((s) => showSpecials || !s.isSpecials).map((season) => (
             <button
               key={season.number}
               type="button"
