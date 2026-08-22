@@ -164,6 +164,16 @@ export interface JellyfinPlaybackInfo {
   playSessionId: string | null;
 }
 
+export interface JellyfinSkipSegment {
+  start: number;
+  end: number;
+}
+
+export interface JellyfinSkipSegments {
+  intro: JellyfinSkipSegment | null;
+  credits: JellyfinSkipSegment | null;
+}
+
 export interface JellyfinClient {
   getSeries(): Promise<JellyfinSeriesItem[]>;
   getEpisodes(seriesId: string): Promise<JellyfinEpisodeItem[]>;
@@ -172,6 +182,7 @@ export interface JellyfinClient {
   getMediaSource(itemId: string, accessToken: string): Promise<JellyfinMediaSource>;
   authenticateUserByName(username: string, password: string): Promise<JellyfinAuth>;
   getPlaybackInfo(itemId: string, userId: string, accessToken: string, startPositionTicks: number, audioStreamIndex?: number, subtitleStreamIndex?: number): Promise<JellyfinPlaybackInfo>;
+  getIntroSkipperSegments(itemId: string, accessToken: string): Promise<JellyfinSkipSegments>;
   requestPlayback(sessionId: string, itemId: string, startPositionTicks?: number): Promise<void>;
   listAllItemIds(): Promise<string[]>;
   deleteItem(id: string): Promise<void>;

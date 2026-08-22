@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { eq } from "drizzle-orm";
 import { createDb, type Db } from "../db/client";
 import { animes, seasons, episodes, trackPreferences, users } from "../db/schema";
 import { PlaybackService, EpisodeNotAvailableError } from "./playback-service";
-import type { JellyfinClient, JellyfinAuth, JellyfinMediaStream, JellyfinMediaSource, JellyfinPlaybackInfo } from "../integrations/types";
+import type { JellyfinClient, JellyfinAuth, JellyfinMediaStream, JellyfinMediaSource, JellyfinPlaybackInfo, JellyfinSkipSegments } from "../integrations/types";
 
 function seedWatchableEpisode(
   db: Db,
@@ -86,6 +87,9 @@ function fakeJellyfin(): JellyfinClient & {
         mediaSourceId: "ms-1",
         playSessionId: "ps-1",
       };
+    },
+    async getIntroSkipperSegments(): Promise<JellyfinSkipSegments> {
+      return { intro: null, credits: null };
     },
     async requestPlayback() {},
     async listAllItemIds() {
@@ -395,6 +399,101 @@ describe("PlaybackService.startPlayback", () => {
     await service.startPlayback(episodeId);
 
     expect(jellyfin.playbackInfoCalls[0]!.subtitleStreamIndex).toBeUndefined();
+  });
+
+  it("exposes intro and credits skip segments from the Intro Skipper plugin", async () => {
+    const { episodeId } = seedWatchableEpisode(db);
+    const jellyfin = fakeJellyfin();
+    jellyfin.getIntroSkipperSegments = async () => ({
+      intro: { start: 28, end: 119.04 },
+      credits: { start: 1420, end: 1514.99 },
+    });
+    service = new PlaybackService(db, jellyfin, {
+      jellyfinUrl: "http://localhost:8096",
+      serviceUsername: "epic",
+      servicePassword: "secret",
+    });
+
+    const result = await service.startPlayback(episodeId);
+
+    expect(result.skipSegments).toEqual({
+      intro: { start: 28, end: 119.04 },
+      credits: { start: 1420, end: 1514.99 },
+    });
+  });
+
+  it("returns empty skip segments when the plugin has no data", async () => {
+    const { episodeId } = seedWatchableEpisode(db);
+    const jellyfin = fakeJellyfin();
+    service = new PlaybackService(db, jellyfin, {
+      jellyfinUrl: "http://localhost:8096",
+      serviceUsername: "epic",
+      servicePassword: "secret",
+    });
+
+    const result = await service.startPlayback(episodeId);
+
+    expect(result.skipSegments).toEqual({ intro: null, credits: null });
+  });
+
+  it("still starts playback when the skip segment request fails", async () => {
+    const { episodeId } = seedWatchableEpisode(db);
+    const jellyfin = fakeJellyfin();
+    jellyfin.getIntroSkipperSegments = async () => {
+      throw new Error("Intro Skipper plugin not installed");
+    };
+    service = new PlaybackService(db, jellyfin, {
+      jellyfinUrl: "http://localhost:8096",
+      serviceUsername: "epic",
+      servicePassword: "secret",
+    });
+
+    const result = await service.startPlayback(episodeId);
+
+    expect(result.url).toContain("stream.m3u8");
+    expect(result.skipSegments).toEqual({ intro: null, credits: null });
+  });
+
+  it("exposes the next episode id and number for the continue button", async () => {
+    const { episodeId } = seedWatchableEpisode(db);
+    const episode = db.select().from(episodes).where(eq(episodes.id, episodeId)).get()!;
+    const next = db
+      .insert(episodes)
+      .values({
+        seasonId: episode.seasonId,
+        episodeNumber: 2,
+        jellyfinItemId: "jf-ep-2",
+        available: true,
+        progressSeconds: 0,
+      })
+      .returning()
+      .get();
+    const jellyfin = fakeJellyfin();
+    service = new PlaybackService(db, jellyfin, {
+      jellyfinUrl: "http://localhost:8096",
+      serviceUsername: "epic",
+      servicePassword: "secret",
+    });
+
+    const result = await service.startPlayback(episodeId);
+
+    expect(result.nextEpisodeId).toBe(next.id);
+    expect(result.nextEpisodeNumber).toBe(2);
+  });
+
+  it("leaves the next episode fields null on the last episode", async () => {
+    const { episodeId } = seedWatchableEpisode(db);
+    const jellyfin = fakeJellyfin();
+    service = new PlaybackService(db, jellyfin, {
+      jellyfinUrl: "http://localhost:8096",
+      serviceUsername: "epic",
+      servicePassword: "secret",
+    });
+
+    const result = await service.startPlayback(episodeId);
+
+    expect(result.nextEpisodeId).toBeNull();
+    expect(result.nextEpisodeNumber).toBeNull();
   });
 });
 

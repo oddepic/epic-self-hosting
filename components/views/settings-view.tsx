@@ -47,6 +47,10 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
   const [sizeLimitLoading, setSizeLimitLoading] = useState(true);
   const [sizeLimitSaving, setSizeLimitSaving] = useState(false);
   const [sizeLimitResult, setSizeLimitResult] = useState<string | null>(null);
+  const [autoplayNext, setAutoplayNext] = useState(true);
+  const [skipInput, setSkipInput] = useState("5");
+  const [skipSaving, setSkipSaving] = useState(false);
+  const [skipResult, setSkipResult] = useState<string | null>(null);
 
   const checkStatus = useCallback(async () => {
     const res = await fetch("/api/mal/status");
@@ -77,10 +81,24 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
     }
   }, []);
 
+  const loadPlayback = useCallback(async () => {
+    try {
+      const res = await fetch("/api/settings/playback");
+      if (res.ok) {
+        const body = (await res.json()) as { autoplayNext: boolean; skipSeconds: number };
+        setAutoplayNext(body.autoplayNext);
+        setSkipInput(String(body.skipSeconds));
+      }
+    } catch {
+      // keep defaults
+    }
+  }, []);
+
   useEffect(() => {
     void checkStatus();
     void loadSizeLimit();
-  }, [checkStatus, loadSizeLimit, refreshSignal]);
+    void loadPlayback();
+  }, [checkStatus, loadSizeLimit, loadPlayback, refreshSignal]);
 
   async function onSaveSizeLimit() {
     const maxGb = Number(sizeLimit);
@@ -182,6 +200,42 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
     }
   }
 
+  async function onToggleAutoplay() {
+    const next = !autoplayNext;
+    setAutoplayNext(next);
+    try {
+      await fetch("/api/settings/playback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoplayNext: next }),
+      });
+    } catch {
+      setAutoplayNext(!next);
+    }
+  }
+
+  async function onSaveSkipSeconds() {
+    const seconds = Number(skipInput);
+    if (!Number.isFinite(seconds) || seconds < 1 || seconds > 60) {
+      setSkipResult("Enter a number between 1 and 60.");
+      return;
+    }
+    setSkipSaving(true);
+    try {
+      const res = await fetch("/api/settings/playback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skipSeconds: seconds }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setSkipResult("Saved.");
+    } catch {
+      setSkipResult("Could not save.");
+    } finally {
+      setSkipSaving(false);
+    }
+  }
+
   async function onHardReset() {
     if (!window.confirm("Hard reset? This removes ALL Sonarr series and empties the anime folder (the folder itself is kept), purges the Jellyfin library, and wipes the app database — back to a brand-new user.")) {
       return;
@@ -207,6 +261,39 @@ export default function SettingsView({ refreshSignal }: { refreshSignal?: number
 
   return (
     <div className="max-w-2xl">
+      <SettingSection title="Playback">
+        <SettingRow label="Autoplay next episode" description="Start the next episode automatically when the current one ends.">
+          <input
+            type="checkbox"
+            checked={autoplayNext}
+            onChange={() => void onToggleAutoplay()}
+            aria-label="Autoplay next episode"
+            className="h-4 w-4 accent-accent"
+          />
+        </SettingRow>
+        <SettingRow label="Skip / rewind seconds" description="How far the skip and rewind buttons jump.">
+          <div className="relative">
+            <Input
+              type="number"
+              min="1"
+              max="60"
+              step="1"
+              value={skipInput}
+              onChange={(e) => setSkipInput(e.target.value)}
+              placeholder="5"
+              className="w-24 pr-10"
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-[11px] uppercase tracking-wider text-text-muted">
+              s
+            </span>
+          </div>
+          <Button onClick={() => void onSaveSkipSeconds()} disabled={skipSaving}>
+            {skipSaving ? "Saving…" : "Save"}
+          </Button>
+          {skipResult && <span className="text-xs text-text-muted">{skipResult}</span>}
+        </SettingRow>
+      </SettingSection>
+
       <SettingSection title="Integrations">
         <SettingRow label="MyAnimeList" description="Status changes and completed episodes push automatically while connected.">
           <ConnectionStatus linked={linked} />

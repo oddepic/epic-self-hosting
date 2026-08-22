@@ -69,6 +69,9 @@ function fakeJellyfin(): JellyfinClient {
         playSessionId: "ps-1",
       };
     },
+    async getIntroSkipperSegments() {
+      return { intro: null, credits: null };
+    },
     async requestPlayback() {},
     async listAllItemIds() {
       return [];
@@ -93,8 +96,16 @@ describe("PlaybackService.getNextAvailableEpisode", () => {
 
   it("returns the next available episode in order", () => {
     const { episodeIds } = seedSeries(db);
-    expect(service.getNextAvailableEpisode(episodeIds[0]!)).toBe(episodeIds[1]);
-    expect(service.getNextAvailableEpisode(episodeIds[1]!)).toBe(episodeIds[2]);
+    expect(service.getNextAvailableEpisode(episodeIds[0]!)).toEqual({
+      id: episodeIds[1],
+      seasonNumber: 1,
+      episodeNumber: 2,
+    });
+    expect(service.getNextAvailableEpisode(episodeIds[1]!)).toEqual({
+      id: episodeIds[2],
+      seasonNumber: 1,
+      episodeNumber: 3,
+    });
   });
 
   it("returns null for the last episode", () => {
@@ -105,7 +116,11 @@ describe("PlaybackService.getNextAvailableEpisode", () => {
   it("skips unavailable episodes", () => {
     const { episodeIds } = seedSeries(db);
     db.update(episodes).set({ available: false }).where(eq(episodes.id, episodeIds[1]!)).run();
-    expect(service.getNextAvailableEpisode(episodeIds[0]!)).toBe(episodeIds[2]);
+    expect(service.getNextAvailableEpisode(episodeIds[0]!)).toEqual({
+      id: episodeIds[2],
+      seasonNumber: 1,
+      episodeNumber: 3,
+    });
   });
 
   it("returns null when the episode is unknown", () => {
@@ -158,6 +173,10 @@ describe("PlaybackService.getNextAvailableEpisode", () => {
       .values({ seasonId: season2.id, episodeNumber: 1, jellyfinItemId: "jf-s2e1", available: true })
       .returning()
       .get();
-    expect(service.getNextAvailableEpisode(s1e1.id)).toBe(s2e1.id);
+    expect(service.getNextAvailableEpisode(s1e1.id)).toEqual({
+      id: s2e1.id,
+      seasonNumber: 2,
+      episodeNumber: 1,
+    });
   });
 });

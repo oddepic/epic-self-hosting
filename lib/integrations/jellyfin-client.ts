@@ -5,7 +5,7 @@ import { SubtitleDeliveryMethod } from "@jellyfin/sdk/lib/generated-client/model
 import { getUserApi } from "@jellyfin/sdk/lib/utils/api/user-api";
 import { getUserLibraryApi } from "@jellyfin/sdk/lib/utils/api/user-library-api";
 import { getMediaInfoApi } from "@jellyfin/sdk/lib/utils/api/media-info-api";
-import type { JellyfinClient, JellyfinAuth, JellyfinEpisodeItem, JellyfinMediaStream, JellyfinMediaSource, JellyfinPlaybackInfo, JellyfinSeriesItem, JellyfinSession } from "./types";
+import type { JellyfinClient, JellyfinAuth, JellyfinEpisodeItem, JellyfinMediaStream, JellyfinMediaSource, JellyfinPlaybackInfo, JellyfinSeriesItem, JellyfinSession, JellyfinSkipSegment, JellyfinSkipSegments } from "./types";
 
 interface JellyfinItemDto {
   Id: string;
@@ -47,7 +47,7 @@ function isUnauthorized(error: unknown): boolean {
 export const WEB_DEVICE_PROFILE = {
   MaxStreamingBitrate: 120_000_000,
   DirectPlayProfiles: [
-    { Container: "mp4", VideoCodec: "h264", AudioCodec: "aac", Type: DlnaProfileType.Video },
+    { Container: "mp4", VideoCodec: "h264,hevc,h265", AudioCodec: "aac", Type: DlnaProfileType.Video },
     { Container: "webm", VideoCodec: "vp8,vp9,av1", AudioCodec: "opus,vorbis", Type: DlnaProfileType.Video },
   ],
   TranscodingProfiles: [
@@ -55,7 +55,7 @@ export const WEB_DEVICE_PROFILE = {
       Container: "ts",
       Type: DlnaProfileType.Video,
       AudioCodec: "aac",
-      VideoCodec: "h264",
+      VideoCodec: "h264,hevc,h265",
       Protocol: MediaStreamProtocol.Hls,
       EnableSubtitlesInManifest: false,
     },
@@ -248,6 +248,37 @@ export class JellyfinSdkClient implements JellyfinClient {
         })),
       };
     });
+  }
+
+  async getIntroSkipperSegments(itemId: string, accessToken: string): Promise<JellyfinSkipSegments> {
+    // Fully degraded by contract: the Intro Skipper plugin may be missing or
+    // the episode not analyzed, in which case playback must not be affected.
+    const empty: JellyfinSkipSegments = { intro: null, credits: null };
+    try {
+      return await this.withFreshAuth(accessToken, async (token) => {
+        const response = await fetch(`${this.api.basePath}/Episode/${itemId}/IntroSkipperSegments`, {
+          headers: { "X-Emby-Token": token },
+        });
+        if (!response.ok) return empty;
+        const data = (await response.json()) as {
+          Introduction?: { Start?: number; End?: number; Valid?: boolean };
+          Credits?: { Start?: number; End?: number; Valid?: boolean };
+        };
+        const toSegment = (s?: {
+          Start?: number;
+          End?: number;
+          Valid?: boolean;
+        }): JellyfinSkipSegment | null => {
+          if (s?.Valid !== true) return null;
+          if (typeof s.Start !== "number" || typeof s.End !== "number") return null;
+          if (!Number.isFinite(s.Start) || !Number.isFinite(s.End) || s.End <= s.Start) return null;
+          return { start: s.Start, end: s.End };
+        };
+        return { intro: toSegment(data.Introduction), credits: toSegment(data.Credits) };
+      });
+    } catch {
+      return empty;
+    }
   }
 
   private async withFreshAuth<T>(

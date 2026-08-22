@@ -14,10 +14,16 @@ import {
   ticksFromSeconds,
 } from "@/lib/player/save-policy";
 import { reanchorTarget } from "@/lib/player/reanchor";
+import { srtToAss } from "@/lib/player/srt-to-ass";
 
 const RECOVER_COOLDOWN_MS = 4000;
-const STALL_TIMEOUT_MS = 10_000;
+const STALL_TIMEOUT_MS = 30_000;
 const MANIFEST_TIMEOUT_MS = 15_000;
+const PROGRESS_COALESCE_MS = 300;
+
+function isHevcCodec(codec: string | null): boolean {
+  return codec != null && /hevc|h265|hvc1/i.test(codec);
+}
 
 export interface AudioTrackInfo {
   index: number;
@@ -50,7 +56,9 @@ export interface PlaybackStart {
   mediaSourceId: string | null;
   playSessionId: string | null;
   playMethod: string;
+  videoCodec: string | null;
   nextEpisodeId: number | null;
+  nextEpisodeNumber: number | null;
   episodeId: number;
   seasonNumber: number;
   episodeNumber: number;
@@ -60,6 +68,7 @@ export interface PlaybackStart {
   subtitleTracks: SubtitleTrackInfo[];
   fontAttachments: FontAttachmentInfo[];
   selectedSubtitleIndex: number | null;
+  skipSegments: { intro: { start: number; end: number } | null; credits: { start: number; end: number } | null };
 }
 
 export interface PlayerState {
@@ -71,10 +80,14 @@ export interface PlayerState {
   activeAudioIndex: number | null;
   activeSubtitleIndex: number | null;
   buffering: boolean;
+  ended: boolean;
 }
 
 export interface PlayerEngineOptions {
-  onAutoAdvance: (episodeId: number) => void;
+  // Returns whether the engine actually auto-advanced. When it returns false
+  // (autoplay disabled), the engine keeps the finished episode in state so the
+  // UI can offer a manual "Continue to EP X" button.
+  onAutoAdvance: (episodeId: number) => boolean;
   videoRef: RefObject<HTMLVideoElement | null>;
 }
 
@@ -88,6 +101,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     activeAudioIndex: null,
     activeSubtitleIndex: null,
     buffering: false,
+    ended: false,
   });
 
   const sessionRef = useRef<PlaybackStart | null>(null);
@@ -98,7 +112,6 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
   const startPositionRef = useRef(0);
   const loadGenerationRef = useRef(0);
   const autoAdvanceRef = useRef(onAutoAdvance);
-  autoAdvanceRef.current = onAutoAdvance;
   const playRef = useRef<(episodeId: number, resume?: boolean) => Promise<void>>(async () => {});
   const lastRecoverAtRef = useRef(0);
   const hlsPositionManagedRef = useRef(false);
@@ -106,34 +119,62 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
   const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manifestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playInFlightRef = useRef<number | null>(null);
+  const progressDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingProgressRef = useRef<{ positionSeconds: number; isPaused: boolean } | null>(null);
+  const streamAliveRef = useRef(false);
 
-  const report = useCallback((path: string, body: Record<string, unknown>): void => {
-    const session = sessionRef.current;
-    if (!session) return;
-    const { serverUrl, token } = parseStreamServer(session.url);
-    void fetch(`${serverUrl}${path}`, {
-      method: "POST",
-      headers: { "X-Emby-Token": token, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      keepalive: true,
-    });
-  }, []);
+  const report = useCallback(
+    (path: string, body: Record<string, unknown>, opts?: { keepalive?: boolean }): void => {
+      const session = sessionRef.current;
+      if (!session) return;
+      const { serverUrl, token } = parseStreamServer(session.url);
+      void fetch(`${serverUrl}${path}`, {
+        method: "POST",
+        headers: { "X-Emby-Token": token, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        // keepalive is only needed for the final pagehide flush; on every other
+        // report it makes the browser skip connection-retry and turns transient
+        // resets into "Fetch failed loading" (seen in Brave).
+        keepalive: opts?.keepalive ?? false,
+      }).catch(() => {});
+    },
+    [],
+  );
 
   const reportProgress = useCallback(
     (positionSeconds: number, isPaused: boolean): void => {
       const session = sessionRef.current;
       if (!session) return;
-      report("/Sessions/Playing/Progress", buildProgressPayload(session, ticksFromSeconds(positionSeconds), isPaused));
+      // Mark the save throttling clock now (so the 15s periodic timer and
+      // rapid pause/seek spam share one cadence), then coalesce the actual
+      // fetch: a flood of pause/seek events collapses into a single trailing
+      // report instead of one request per event.
       lastSaveAtRef.current = Date.now();
+      pendingProgressRef.current = { positionSeconds, isPaused };
+      if (progressDebounceRef.current != null) {
+        clearTimeout(progressDebounceRef.current);
+      }
+      progressDebounceRef.current = setTimeout(() => {
+        progressDebounceRef.current = null;
+        const pending = pendingProgressRef.current;
+        pendingProgressRef.current = null;
+        if (!pending) return;
+        const session = sessionRef.current;
+        if (!session) return;
+        report(
+          "/Sessions/Playing/Progress",
+          buildProgressPayload(session, ticksFromSeconds(pending.positionSeconds), pending.isPaused),
+        );
+      }, PROGRESS_COALESCE_MS);
     },
     [report],
   );
 
   const reportStopped = useCallback(
-    (positionSeconds: number): void => {
+    (positionSeconds: number, opts?: { keepalive?: boolean }): void => {
       const session = sessionRef.current;
       if (!session) return;
-      report("/Sessions/Playing/Stopped", buildStoppedPayload(session, ticksFromSeconds(positionSeconds)));
+      report("/Sessions/Playing/Stopped", buildStoppedPayload(session, ticksFromSeconds(positionSeconds)), opts);
     },
     [report],
   );
@@ -150,7 +191,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     const position = video.currentTime;
     reportStopped(position);
     sessionRef.current = null;
-    setState((s) => ({ ...s, session: null, status: "starting" }));
+    setState((s) => ({ ...s, session: null, status: "starting", ended: false }));
     void playRef.current(session.episodeId, true);
   }, [reportStopped]);
 
@@ -174,7 +215,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       }
     };
     const onPlay = () => {
-      setState((s) => ({ ...s, status: "playing", buffering: false }));
+      setState((s) => ({ ...s, status: "playing", buffering: false, ended: false }));
       if (stallTimerRef.current != null) {
         clearTimeout(stallTimerRef.current);
         stallTimerRef.current = null;
@@ -231,13 +272,16 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     const onWaiting = () => {
       setState((s) => ({ ...s, buffering: true }));
       if (stallTimerRef.current != null) return;
-      // Stall watchdog: if buffering persists without `playing`/`canplay`
-      // returning, the stream is wedged (e.g. a seek landed on a fragment
-      // with no data, or the token went stale). Re-resolve once to break out
-      // instead of spinning forever.
+      // Stall watchdog: re-resolve only if the stream has delivered NO data at
+      // all. A stream that has buffered anything is alive — just a slow
+      // transcode — and re-resolving it would restart the transcode and loop
+      // (stall → re-resolve → stall). Without data, the stream is genuinely
+      // wedged (bad manifest/token) and re-resolving is the only way out.
       stallTimerRef.current = setTimeout(() => {
         stallTimerRef.current = null;
-        recoverStream(video);
+        if (!streamAliveRef.current) {
+          recoverStream(video);
+        }
       }, STALL_TIMEOUT_MS);
     };
     const onCanPlay = () => {
@@ -257,6 +301,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       const position = video.currentTime;
       lastPositionRef.current = position;
       reportProgress(position, video.paused);
+      setState((s) => ({ ...s, ended: false }));
     };
     const onLoadedMetadata = () => {
       // hls.js already seeks to `startPosition` itself; a second manual seek
@@ -273,11 +318,32 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       lastPositionRef.current = position;
       reportStopped(position);
       const session = sessionRef.current;
-      sessionRef.current = null;
-      setState((s) => ({ ...s, session: null, status: "idle", positionSeconds: position }));
-      if (session?.nextEpisodeId != null) {
-        autoAdvanceRef.current(session.nextEpisodeId);
+      if (session == null || session.nextEpisodeId == null) {
+        sessionRef.current = null;
+        setState((s) => ({
+          ...s,
+          session: null,
+          status: "idle",
+          positionSeconds: position,
+          ended: false,
+        }));
+        return;
       }
+      if (autoAdvanceRef.current(session.nextEpisodeId)) {
+        sessionRef.current = null;
+        setState((s) => ({
+          ...s,
+          session: null,
+          status: "idle",
+          positionSeconds: position,
+          ended: false,
+        }));
+        return;
+      }
+      // Autoplay is off: keep the finished episode in state (sessionRef is
+      // cleared so no further reports fire) and let the UI offer "Continue".
+      sessionRef.current = null;
+      setState((s) => ({ ...s, status: "paused", positionSeconds: position, ended: true }));
     };
     const onError = () => {
       // Network (2) usually means a stale token → full re-resolve. Decode (3)
@@ -289,7 +355,12 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       }
     };
     const onPageHide = () => {
-      reportStopped(lastPositionRef.current);
+      reportStopped(lastPositionRef.current, { keepalive: true });
+    };
+    const onProgress = () => {
+      // Any media data arriving proves the stream is alive (a slow transcode
+      // still delivering). The stall watchdog must not re-resolve from here.
+      streamAliveRef.current = true;
     };
 
     video.addEventListener("timeupdate", onTimeUpdate);
@@ -303,6 +374,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     video.addEventListener("pause", onPause);
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("progress", onProgress);
     video.addEventListener("ended", onEnded);
     video.addEventListener("error", onError);
     window.addEventListener("pagehide", onPageHide);
@@ -315,6 +387,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       video.removeEventListener("pause", onPause);
       video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("progress", onProgress);
       video.removeEventListener("ended", onEnded);
       video.removeEventListener("error", onError);
       window.removeEventListener("pagehide", onPageHide);
@@ -330,6 +403,11 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       clearTimeout(manifestTimerRef.current);
       manifestTimerRef.current = null;
     }
+    if (progressDebounceRef.current != null) {
+      clearTimeout(progressDebounceRef.current);
+      progressDebounceRef.current = null;
+    }
+    pendingProgressRef.current = null;
     hlsRef.current?.destroy();
     hlsRef.current = null;
     jassubRef.current?.destroy();
@@ -379,11 +457,16 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
           stallTimerRef.current = null;
         }
         reanchoredRef.current = true;
+        streamAliveRef.current = false;
         video.removeAttribute("src");
         video.load();
 
         const needsHls = start.url.includes(".m3u8") || start.url.includes("master");
-        const canPlayNativeHls = !needsHls || video.canPlayType("application/vnd.apple.mpegurl") !== "";
+        // Native HLS can't decode HEVC (Chromium reports "maybe" for HLS but
+        // rejects HEVC segments), so HEVC must always go through hls.js + MSE.
+        const canPlayNativeHls =
+          !needsHls ||
+          (!isHevcCodec(start.videoCodec) && video.canPlayType("application/vnd.apple.mpegurl") !== "");
         const seekAfterReady = () => {
           video.currentTime = currentTime;
           video
@@ -445,7 +528,11 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
           ]);
           if (generation !== loadGenerationRef.current) return;
           if (!subResponse.ok) return;
-          const subContent = await subResponse.text();
+          const rawContent = await subResponse.text();
+          // JASSUB is libass — it only parses ASS/SSA. SRT/SubRip tracks are
+          // converted to a minimal ASS script so they render through the same
+          // canvas instead of failing with "Failed to start a track".
+          const subContent = /srt|subrip/i.test(track.codec ?? "") ? srtToAss(rawContent) : rawContent;
           const fontBuffers = fontResponses
             .filter((b): b is ArrayBuffer => b != null)
             .map((b) => new Uint8Array(b));
@@ -496,6 +583,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
       }
       sessionRef.current = null;
       reanchoredRef.current = false;
+      streamAliveRef.current = false;
       teardown();
       const generation = ++loadGenerationRef.current;
       setState({
@@ -507,6 +595,7 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
         activeAudioIndex: null,
         activeSubtitleIndex: null,
         buffering: true,
+        ended: false,
       });
 
       try {
@@ -544,8 +633,10 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
         report("/Sessions/Playing", buildStartPayload(start));
 
         const needsHls = start.url.includes(".m3u8") || start.url.includes("master");
+        // Native HLS can't decode HEVC, so HEVC must go through hls.js + MSE.
         const canPlayNativeHls =
-          !needsHls || video.canPlayType("application/vnd.apple.mpegurl") !== "";
+          !needsHls ||
+          (!isHevcCodec(start.videoCodec) && video.canPlayType("application/vnd.apple.mpegurl") !== "");
 
         if (needsHls && !canPlayNativeHls) {
           hlsPositionManagedRef.current = true;
@@ -628,14 +719,12 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     }
   }, [attachSubtitles, recoverMediaError, recoverStream, report, reportStopped, teardown, videoRef]);
 
-  playRef.current = play;
-
   const close = useCallback(() => {
     reportStopped(lastPositionRef.current);
     playInFlightRef.current = null;
     teardown();
     sessionRef.current = null;
-    setState({ status: "idle", error: null, session: null, positionSeconds: 0, durationSeconds: null, activeAudioIndex: null, activeSubtitleIndex: null, buffering: false });
+    setState({ status: "idle", error: null, session: null, positionSeconds: 0, durationSeconds: null, activeAudioIndex: null, activeSubtitleIndex: null, buffering: false, ended: false });
   }, [reportStopped, teardown]);
 
   useEffect(() => {
@@ -643,6 +732,14 @@ export function usePlayerEngine({ onAutoAdvance, videoRef }: PlayerEngineOptions
     if (!video) return;
     return attachVideo(video);
   }, [attachVideo, videoRef]);
+
+  useEffect(() => {
+    autoAdvanceRef.current = onAutoAdvance;
+  }, [onAutoAdvance]);
+
+  useEffect(() => {
+    playRef.current = play;
+  }, [play]);
 
   return { videoRef, state, play, close, setSubtitle, setAudio };
 }

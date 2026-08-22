@@ -3,8 +3,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize2, Pause, Play, RotateCcw, RotateCw, Volume1, Volume2, VolumeX, X } from "lucide-react";
+import { ArrowLeft, AudioLines, Captions, Loader2, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, SkipForward, Volume1, Volume2, VolumeX, X } from "lucide-react";
 import { usePlayerEngine, type PlaybackStart, type PlayerState } from "./use-player-engine";
+import { activeSkipSegment } from "@/lib/player/skip-segments";
 
 export interface PlayerContextValue {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -48,16 +49,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const barRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenRef = useRef<HTMLDivElement | null>(null);
   const pendingSkipRef = useRef(0);
   const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const SKIP_COALESCE_MS = 300;
 
+  const [skipSeconds, setSkipSeconds] = useState(5);
+  const [autoplayNext, setAutoplayNext] = useState(true);
+  const [volume, setVolume] = useState(1);
+
+  useEffect(() => {
+    void fetch("/api/settings/playback")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => {
+        if (!b) return;
+        setSkipSeconds(typeof b.skipSeconds === "number" ? b.skipSeconds : 5);
+        setAutoplayNext(typeof b.autoplayNext === "boolean" ? b.autoplayNext : true);
+        setVolume(typeof b.volume === "number" ? b.volume : 1);
+      })
+      .catch(() => {});
+  }, [pathname]);
+
   const onAutoAdvance = useMemo(
-    () => (episodeId: number) => {
+    () => (episodeId: number): boolean => {
+      if (!autoplayNext) return false;
       router.replace(`/watch/${episodeId}`);
+      return true;
     },
-    [router],
+    [router, autoplayNext],
   );
 
   const { state, play, close, setSubtitle, setAudio } = usePlayerEngine({ onAutoAdvance, videoRef });
@@ -73,14 +93,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [videoRef, state, play, close, setAudio, setSubtitle, mode],
   );
 
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === fullscreenRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  // Escape is handled by the browser; this just leaves fullscreen when the
+  // player shrinks out of big mode (back to home) so the mini card is not
+  // stuck inside a fullscreened element.
+  useEffect(() => {
+    if (mode !== "big" && isFullscreen) {
+      void document.exitFullscreen().catch(() => {});
+    }
+  }, [mode, isFullscreen]);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement === fullscreenRef.current) {
+      void document.exitFullscreen().catch(() => {});
+    } else {
+      void fullscreenRef.current?.requestFullscreen().catch(() => {});
+    }
+  }, []);
+
   const [controlsVisible, setControlsVisible] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [dragFraction, setDragFraction] = useState<number | null>(null);
-  const [volume, setVolume] = useState(1);
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
   const [subtitleMenuOpen, setSubtitleMenuOpen] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controlsHoveredRef = useRef(false);
+  const saveVolumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep the always-mounted <video> element's volume in sync with the state
+  // (covers both the initial load of the persisted value and slider changes).
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.volume = volume;
+  }, [volume]);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -108,6 +159,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     ? `${state.session.animeTitle ?? "Anime"} · S${String(state.session.seasonNumber).padStart(2, "0")}E${String(state.session.episodeNumber).padStart(2, "0")}`
     : null;
 
+  const episodeLabel = state.session
+    ? `S${String(state.session.seasonNumber).padStart(2, "0")} · E${String(state.session.episodeNumber).padStart(2, "0")}`
+    : null;
+
   const progress =
     state.durationSeconds && state.durationSeconds > 0
       ? (state.positionSeconds / state.durationSeconds) * 100
@@ -120,6 +175,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         ? state.positionSeconds / state.durationSeconds
         : 0;
 
+  // Skip Intro / Skip Ending: while the playhead is inside a detected segment
+  // window (Intro Skipper plugin), offer a one-click jump to the segment end.
+  const skipTarget = useMemo(
+    () => activeSkipSegment(state.session?.skipSegments, state.positionSeconds),
+    [state.session?.skipSegments, state.positionSeconds],
+  );
+
+  // Continue to EP X: when the episode ends and autoplay-next is off, offer a
+  // manual jump to the next episode instead of auto-advancing.
+  const continueEpisode = useMemo(() => {
+    if (autoplayNext || !state.ended) return null;
+    const session = state.session;
+    if (session?.nextEpisodeId == null) return null;
+    return { episodeId: session.nextEpisodeId, episodeNumber: session.nextEpisodeNumber };
+  }, [autoplayNext, state.ended, state.session]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -131,6 +202,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const video = videoRef.current;
     setVolume(level);
     if (video) video.volume = level;
+    // Persist the volume, debounced so dragging the slider doesn't spam.
+    if (saveVolumeTimerRef.current != null) clearTimeout(saveVolumeTimerRef.current);
+    saveVolumeTimerRef.current = setTimeout(() => {
+      void fetch("/api/settings/playback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ volume: level }),
+      }).catch(() => {});
+    }, 300);
   }, []);
 
   const onPickAudio = useCallback(
@@ -190,6 +270,37 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return clamp((clientX - rect.left) / rect.width, 0, 1);
   }, []);
 
+  const volumeBarRef = useRef<HTMLDivElement | null>(null);
+  const volumeDragRef = useRef(false);
+
+  const volumeFractionFromEvent = useCallback((clientX: number): number => {
+    const rect = volumeBarRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return 0;
+    return clamp((clientX - rect.left) / rect.width, 0, 1);
+  }, []);
+
+  const onVolumePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+      volumeDragRef.current = true;
+      setVolumeLevel(volumeFractionFromEvent(e.clientX));
+    },
+    [volumeFractionFromEvent, setVolumeLevel],
+  );
+
+  const onVolumePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      if (!volumeDragRef.current) return;
+      setVolumeLevel(volumeFractionFromEvent(e.clientX));
+    },
+    [volumeFractionFromEvent, setVolumeLevel],
+  );
+
+  const onVolumePointerUp = useCallback(() => {
+    volumeDragRef.current = false;
+  }, []);
+
   const onBarPointerDown = useCallback(
     (e: React.PointerEvent) => {
       const video = videoRef.current;
@@ -230,18 +341,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) return;
       if (e.key === "ArrowLeft") {
         e.preventDefault();
-        skip(-5);
+        skip(-skipSeconds);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        skip(5);
+        skip(skipSeconds);
       } else if (e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
         togglePlay();
+      } else if (e.key === "Escape" && !document.fullscreenElement) {
+        // In fullscreen the browser owns Escape (exits fullscreen); outside
+        // it, Escape does the same as the back arrow: back to home.
+        e.preventDefault();
+        router.push("/");
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mode, skip, togglePlay]);
+  }, [mode, skip, togglePlay, skipSeconds, router]);
 
   return (
     <PlayerContext.Provider value={value}>
@@ -249,6 +365,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
       {/* One <video>, always mounted. Only its wrapper's layout changes. */}
       <div
+        ref={fullscreenRef}
         className={
           mode === "hidden"
             ? "hidden"
@@ -330,6 +447,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </div>
           )}
 
+          {mode === "big" && skipTarget && (
+            <div className="absolute bottom-24 right-6">
+              <button
+                onClick={() => {
+                  const video = videoRef.current;
+                  if (video && Number.isFinite(video.duration)) {
+                    // A plain seek: the engine's `seeked` listener reports it
+                    // through the normal save cycle; nothing marks the episode
+                    // watched.
+                    video.currentTime = skipTarget.end;
+                  }
+                  showControls();
+                }}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
+              >
+                <SkipForward className="mr-1.5 inline h-4 w-4" aria-hidden />
+                {skipTarget.kind === "intro" ? "Skip Intro" : "Skip Ending"}
+              </button>
+            </div>
+          )}
+
+          {mode === "big" && continueEpisode && (
+            <div className="absolute bottom-24 right-6">
+              <button
+                onClick={() => router.replace(`/watch/${continueEpisode.episodeId}`)}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-accent-hover active:bg-accent"
+              >
+                <SkipForward className="mr-1.5 inline h-4 w-4" aria-hidden />
+                {continueEpisode.episodeNumber != null
+                  ? `Continue to EP ${continueEpisode.episodeNumber}`
+                  : "Continue to next episode"}
+              </button>
+            </div>
+          )}
+
           {mode === "big" && state.status === "error" && (
             <div className="absolute inset-0 flex items-center justify-center bg-background/80">
               <div className="max-w-md p-8 text-center">
@@ -376,14 +528,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 </div>
               </div>
 
-              <div className="mt-1 flex items-center gap-1">
+              <div className="relative mt-1 flex items-center gap-1">
                 <button
-                  onClick={() => skip(-5)}
-                  aria-label="Back 5 seconds"
+                  onClick={() => skip(-skipSeconds)}
+                  aria-label={`Back ${skipSeconds} seconds`}
                   className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                 >
                   <RotateCcw className="h-5 w-5" aria-hidden />
-                  <span className="sr-only">Back 5 seconds</span>
+                  <span className="sr-only">Back {skipSeconds} seconds</span>
                 </button>
                 <button
                   onClick={togglePlay}
@@ -397,31 +549,48 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                   )}
                 </button>
                 <button
-                  onClick={() => skip(5)}
-                  aria-label="Forward 5 seconds"
+                  onClick={() => skip(skipSeconds)}
+                  aria-label={`Forward ${skipSeconds} seconds`}
                   className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                 >
                   <RotateCw className="h-5 w-5" aria-hidden />
-                  <span className="sr-only">Forward 5 seconds</span>
+                  <span className="sr-only">Forward {skipSeconds} seconds</span>
                 </button>
 
-                <span className="ml-2 font-mono text-xs text-text-secondary">
-                  {formatPosition(state.positionSeconds)}
-                  {state.durationSeconds ? ` / ${formatPosition(state.durationSeconds)}` : ""}
-                </span>
+                {episodeLabel && (
+                  <div className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 -translate-y-0.5 flex-col items-center gap-0.5">
+                    <span className="font-mono text-xs text-text-primary">{episodeLabel}</span>
+                    <span className="font-mono text-xs text-text-secondary">
+                      {formatPosition(state.positionSeconds)}
+                      {state.durationSeconds ? ` / ${formatPosition(state.durationSeconds)}` : ""}
+                    </span>
+                  </div>
+                )}
 
                 <div className="ml-auto flex items-center gap-1">
                   <div className="group flex items-center">
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={volume}
-                      onChange={(e) => setVolumeLevel(Number(e.target.value))}
+                    <div
+                      ref={volumeBarRef}
+                      role="slider"
                       aria-label="Volume"
-                      className="w-0 origin-right scale-x-0 opacity-0 transition-all duration-150 group-hover:mr-1 group-hover:w-20 group-hover:scale-x-100 group-hover:opacity-100 accent-accent"
-                    />
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(volume * 100)}
+                      className="relative h-5 w-0 origin-right scale-x-0 cursor-pointer touch-none opacity-0 transition-all duration-150 group-hover:mr-1 group-hover:w-20 group-hover:scale-x-100 group-hover:opacity-100"
+                      onPointerDown={onVolumePointerDown}
+                      onPointerMove={onVolumePointerMove}
+                      onPointerUp={onVolumePointerUp}
+                    >
+                      <div className="absolute top-1/2 h-1 w-full -translate-y-1/2 rounded-full bg-surface-raised" />
+                      <div
+                        className="peer/volthumb absolute top-1/2 z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent transition-colors hover:bg-accent-hover active:bg-accent"
+                        style={{ left: `${volume * 100}%` }}
+                      />
+                      <div
+                        className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-accent transition-colors peer-hover/volthumb:bg-accent-hover"
+                        style={{ width: `${volume * 100}%` }}
+                      />
+                    </div>
                     <button
                       onClick={() => setVolumeLevel(volume > 0 ? 0 : 1)}
                       aria-label={volume > 0 ? "Mute" : "Unmute"}
@@ -508,12 +677,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 
                   <button
-                    onClick={() => router.push("/")}
-                    aria-label="Minimize player"
+                    onClick={toggleFullscreen}
+                    aria-label={isFullscreen ? "Exit full screen" : "Full screen"}
                     className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
                   >
-                    <Minimize2 className="h-5 w-5" aria-hidden />
-                    <span className="sr-only">Minimize player</span>
+                    {isFullscreen ? (
+                      <Minimize className="h-5 w-5" aria-hidden />
+                    ) : (
+                      <Maximize className="h-5 w-5" aria-hidden />
+                    )}
+                    <span className="sr-only">
+                      {isFullscreen ? "Exit full screen" : "Full screen"}
+                    </span>
                   </button>
                 </div>
               </div>

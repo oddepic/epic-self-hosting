@@ -31,14 +31,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  console.error(
-    "[webhook]",
-    payload.NotificationType,
-    "userId=" + payload.UserId,
-    "itemId=" + payload.ItemId,
-    "position=" + payload.PlaybackPositionTicks,
-    "completed=" + payload.PlayedToCompletion,
-  );
   const { completedEpisodeIds, statusChangedAnimeIds } = service.handleEvent(payload);
   if (payload.NotificationType === "ItemAdded") {
     publish("availability-updated", { reason: "webhook-item-added" });
